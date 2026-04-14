@@ -1,0 +1,13 @@
+{
+  "name": "maquina-de-punos",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mercadopago": "^1.5.14",
+    "axios": "^1.6.0"
+  }
+}
