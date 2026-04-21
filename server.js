@@ -26,6 +26,19 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 });
 
+app.get('/', async (req, res) => {
+  const order = await axios.post(
+    'https://api.mercadopago.com/mpmobile/instore/qr/seller/collectors/me/pos/QR1/orders',
+    {
+      external_reference: 'punos-' + Date.now(),
+      total_amount: 2000,
+      items: [{ title: 'Puño', unit_price: 2000, quantity: 1, unit_measure: 'unit', total_amount: 2000 }]
+    },
+    { headers: { Authorization: `Bearer ${MP_TOKEN}` } }
+  );
+  res.json(order.data);
+});
+
 app.listen(process.env.PORT || 3000, () => {
   console.log('Servidor escuchando en puerto ' + (process.env.PORT || 3000));
 });
