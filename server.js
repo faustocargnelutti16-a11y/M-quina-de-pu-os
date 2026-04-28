@@ -16,12 +16,11 @@ function getConfig() {
 }
 
 async function activarShelly() {
-  await axios.post(`${SHELLY_SERVER}/device/relay/control`, {
+  await axios.post(`${SHELLY_SERVER}/device/rpc`, {
     auth_key: SHELLY_AUTH,
     id: SHELLY_ID,
-    channel: 0,
-    turn: 'on',
-    timer: PULSE_MS / 1000
+    method: 'Switch.Set',
+    params: { id: 0, on: true, toggle_after: PULSE_MS / 1000 }
   });
 }
 
@@ -41,45 +40,4 @@ app.get('/', async (req, res) => {
     res.redirect(response.data.init_point);
   } catch (e) {
     console.error(e.response?.data || e.message);
-    res.status(500).send('Error: ' + JSON.stringify(e.response?.data));
-  }
-});
-
-app.get('/ok', (req, res) => {
-  res.send('Pago recibido, activando maquina...');
-});
-
-app.get('/gratis', async (req, res) => {
-  try {
-    await activarShelly();
-    res.send('Activado');
-  } catch (e) {
-    res.status(500).send('Error: ' + e.message);
-  }
-});
-
-app.post('/webhook', async (req, res) => {
-  const { type, data } = req.body;
-  if (type === 'payment') {
-    try {
-      const payment = await axios.get(
-        `https://api.mercadopago.com/v1/payments/${data.id}`,
-        { headers: { Authorization: `Bearer ${MP_TOKEN}` } }
-      );
-      if (payment.data.status === 'approved') {
-        const { shots } = getConfig();
-        for (let i = 0; i < shots; i++) {
-          await activarShelly();
-          await new Promise(r => setTimeout(r, 1000));
-        }
-      }
-    } catch (e) {
-      console.error(e.message);
-    }
-  }
-  res.sendStatus(200);
-});
-
-app.listen(process.env.PORT || 3000, () => {
-  console.log('Servidor escuchando en puerto ' + (process.env.PORT || 3000));
-});
+    res.status(500).send('Error:
