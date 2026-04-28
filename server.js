@@ -16,7 +16,7 @@ function getConfig() {
 }
 
 async function activarShelly() {
-  await axios.post(`${SHELLY_SERVER}/device/rpc`, {
+  await axios.post(${SHELLY_SERVER}/device/rpc, {
     auth_key: SHELLY_AUTH,
     id: SHELLY_ID,
     method: 'Switch.Set',
@@ -30,14 +30,5 @@ app.get('/', async (req, res) => {
     const response = await axios.post(
       'https://api.mercadopago.com/checkout/preferences',
       {
-        items: [{ title: 'Puño BPK', quantity: 1, unit_price: monto, currency_id: 'ARS' }],
-        back_urls: { success: 'https://m-quina-de-pu-os-us-east.up.railway.app/ok' },
-        auto_return: 'approved',
-        external_reference: 'punos-' + Date.now()
-      },
-      { headers: { Authorization: `Bearer ${MP_TOKEN}` } }
-    );
-    res.redirect(response.data.init_point);
-  } catch (e) {
-    console.error(e.response?.data || e.message);
-    res.status(500).send('Error:
+        items: [{ title: 'Puno BPK', quantity: 1, unit_price: monto, currency_id: 'ARS' }],
+        back_urls: { success: 'https://m-quina-de-pu
