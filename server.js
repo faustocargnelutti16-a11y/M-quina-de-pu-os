@@ -4,7 +4,7 @@ const app = express();
 app.use(express.json());
 
 const MP_TOKEN = process.env.MP_ACCESS_TOKEN;
-const SHELLY_IP = process.env.SHELLY_IP;
+const SHELLY_IP = process.env.SHELLY_IP || '192.168.1.12';
 const PULSE_MS = 150;
 
 function getConfig() {
