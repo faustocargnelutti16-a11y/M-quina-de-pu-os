@@ -4,10 +4,8 @@ const app = express();
 app.use(express.json());
 
 const MP_TOKEN = process.env.MP_ACCESS_TOKEN;
-const PULSE_MS = 150;
-const SHELLY_SERVER = 'https://shelly-241-eu.shelly.cloud';
-const SHELLY_AUTH = 'M2Q4ZTgydWlk033A8E1E4AD95AA98CB4CFB8AA70CDAE12D02B50CC4BBC04206BD1B1AA359119A7E50748967649C0';
-const SHELLY_ID = 'DCB4D9C47830';
+
+let pendingActivation = 0;
 
 function getConfig() {
   const hour = new Date().getHours();
@@ -15,14 +13,20 @@ function getConfig() {
   return { monto: 2000, shots: 1 };
 }
 
-async function activarShelly() {
-  await axios.post(SHELLY_SERVER + '/device/rpc', {
-    auth_key: SHELLY_AUTH,
-    id: SHELLY_ID,
-    method: 'Switch.Set',
-    params: { id: 0, on: true, toggle_after: PULSE_MS / 1000 }
-  });
-}
+app.get('/shelly-poll', (req, res) => {
+  if (pendingActivation > 0) {
+    pendingActivation--;
+    res.send('activate');
+  } else {
+    res.send('ok');
+  }
+});
+
+app.get('/gratis', (req, res) => {
+  const { shots } = getConfig();
+  pendingActivation = shots;
+  res.send('Activado (' + shots + ' pulsos)');
+});
 
 app.get('/', async (req, res) => {
   try {
@@ -43,41 +47,24 @@ app.get('/', async (req, res) => {
   }
 });
 
-app.get('/ok', function(req, res) {
+app.get('/ok', (req, res) => {
   res.send('Pago recibido');
 });
 
-app.get('/gratis', async (req, res) => {
-  try {
-    const { shots } = getConfig();
-    for (let i = 0; i < shots; i++) {
-      await activarShelly();
-      if (i < shots - 1) await new Promise(function(r) { setTimeout(r, 2000); });
-    }
-    res.send('Activado ' + shots + ' pulsos');
-  } catch (e) {
-    res.status(500).send('Error: ' + e.message);
-  }
-});
-
-app.post('/webhook', async (req, res) => {
+app.post('/webhook', (req, res) => {
   const { type, data } = req.body;
   if (type === 'payment') {
-    try {
-      const payment = await axios.get(
-        'https://api.mercadopago.com/v1/payments/' + data.id,
-        { headers: { Authorization: 'Bearer ' + MP_TOKEN } }
-      );
+    axios.get(
+      'https://api.mercadopago.com/v1/payments/' + data.id,
+      { headers: { Authorization: 'Bearer ' + MP_TOKEN } }
+    ).then(function(payment) {
       if (payment.data.status === 'approved') {
         const { shots } = getConfig();
-        for (let i = 0; i < shots; i++) {
-          await activarShelly();
-          if (i < shots - 1) await new Promise(function(r) { setTimeout(r, 2000); });
-        }
+        pendingActivation = shots;
       }
-    } catch (e) {
+    }).catch(function(e) {
       console.error(e.message);
-    }
+    });
   }
   res.sendStatus(200);
 });
