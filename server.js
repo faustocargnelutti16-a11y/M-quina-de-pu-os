@@ -22,7 +22,7 @@ async function crearOrden() {
   const { monto } = getConfig();
   try {
     await axios.put(
-      `https://api.mercadopago.com/instore/qr/seller/collectors/${USER_ID}/pos/${POS_EXT}/orders`,
+      'https://api.mercadopago.com/instore/qr/seller/collectors/' + USER_ID + '/pos/' + POS_EXT + '/orders',
       {
         external_reference: 'BPK-' + Date.now(),
         title: 'Puno BPK',
@@ -128,4 +128,7 @@ app.post('/webhook', (req, res) => {
   }
 });
 
-app.listen(process.env.PORT ||
+app.listen(process.env.PORT || 3000, '0.0.0.0', () => {
+  console.log('Server running');
+  crearOrden();
+});
