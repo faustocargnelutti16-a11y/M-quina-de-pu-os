@@ -3,7 +3,8 @@ const axios = require('axios');
 const app = express();
 app.use(express.json());
 
-const MP_TOKEN = process.env.MP_ACCESS_TOKEN;
+const MP_TOKEN = process.env.MP_ACCESS_TOKEN || 'APP_USR-3958198239703250-041419-e0bb2ed7830d738e9761477def48ee89-458533297';
+const POS_ID = 126297982;
 
 let pendingActivation = 0;
 
@@ -11,6 +12,36 @@ function getConfig() {
   const hour = new Date().getHours();
   if (hour >= 17 && hour < 21) return { monto: 2000, shots: 2 };
   return { monto: 2000, shots: 1 };
+}
+
+async function crearOrden() {
+  const { monto } = getConfig();
+  try {
+    await axios.put(
+      `https://api.mercadopago.com/instore/qr/seller/collectors/458533297/pos/${POS_ID}/orders`,
+      {
+        external_reference: 'BPK-' + Date.now(),
+        title: 'Puno BPK',
+        description: 'Máquina de puños BeerPunchAndKick',
+        notification_url: 'https://m-quina-de-pu-os-production-8483.up.railway.app/webhook',
+        total_amount: monto,
+        items: [{
+          sku_number: 'BPK001',
+          category: 'entretenimiento',
+          title: 'Puno BPK',
+          description: 'Un tiro en la máquina',
+          unit_price: monto,
+          quantity: 1,
+          unit_measure: 'unit',
+          total_amount: monto
+        }]
+      },
+      { headers: { Authorization: 'Bearer ' + MP_TOKEN } }
+    );
+    console.log('Orden creada: $' + monto);
+  } catch (e) {
+    console.error('Error creando orden:', e.response?.data || e.message);
+  }
 }
 
 app.get('/shelly-poll', (req, res) => {
@@ -28,34 +59,20 @@ app.get('/gratis', (req, res) => {
   res.send('Activado (' + shots + ' pulsos)');
 });
 
-app.get('/', async (req, res) => {
-  try {
-    const { monto } = getConfig();
-    const response = await axios.post(
-      'https://api.mercadopago.com/checkout/preferences',
-      {
-        items: [{ title: 'Puno BPK', quantity: 1, unit_price: monto, currency_id: 'ARS' }],
-        back_urls: { success: 'https://m-quina-de-pu-os-us-east.up.railway.app/ok' },
-        auto_return: 'approved',
-        external_reference: 'punos-' + Date.now()
-      },
-      { headers: { Authorization: 'Bearer ' + MP_TOKEN } }
-    );
-    res.redirect(response.data.init_point);
-  } catch (e) {
-    res.status(500).send('Error: ' + e.message);
-  }
-});
-
 app.get('/ok', (req, res) => {
   res.send('Pago recibido');
+});
+
+app.get('/', async (req, res) => {
+  await crearOrden();
+  res.send('Orden lista');
 });
 
 app.post('/webhook', (req, res) => {
   res.sendStatus(200);
   const body = req.body;
   console.log('Webhook recibido:', JSON.stringify(body));
-  if (body && (body.type === 'payment' || body.action === 'payment.updated')) {
+  if (body && (body.type === 'payment' || body.topic === 'payment')) {
     const paymentId = body.data && body.data.id;
     console.log('Payment ID:', paymentId);
     if (paymentId) {
@@ -68,6 +85,7 @@ app.post('/webhook', (req, res) => {
           const { shots } = getConfig();
           pendingActivation = shots;
           console.log('Activando:', shots, 'pulsos');
+          crearOrden();
         }
       }).catch(function(e) {
         console.error('Error MP:', e.message);
@@ -78,5 +96,5 @@ app.post('/webhook', (req, res) => {
 
 app.listen(process.env.PORT || 3000, '0.0.0.0', () => {
   console.log('Server running');
+  crearOrden();
 });
-
