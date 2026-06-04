@@ -18,7 +18,7 @@ async function crearOrden() {
   const { monto } = getConfig();
   try {
     await axios.put(
-      `https://api.mercadopago.com/instore/qr/seller/collectors/458533297/pos/${POS_ID}/orders`,
+      `https://api.mercadopago.com/instore/qr/seller/collectors/458533297/stores/73977333/pos/${POS_ID}/orders`,
       {
         external_reference: 'BPK-' + Date.now(),
         title: 'Puno BPK',
