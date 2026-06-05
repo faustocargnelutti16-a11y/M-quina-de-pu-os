@@ -13,7 +13,11 @@ const pagosProcesados = new Set();
 const H = { headers: { Authorization: 'Bearer ' + MP_TOKEN, 'Content-Type': 'application/json' } };
 
 function getConfig() {
-  const hour = new Date().getHours();
+  // Fix zona horaria: Railway corre en UTC, Argentina es UTC-3
+  const now = new Date(new Date().toLocaleString('en-US', {
+    timeZone: 'America/Argentina/Buenos_Aires'
+  }));
+  const hour = now.getHours();
   if (hour >= 17 && hour < 21) return { monto: 2000, shots: 2 };
   return { monto: 2000, shots: 1 };
 }
@@ -100,7 +104,7 @@ app.get('/shelly-poll', (req, res) => {
 
 app.get('/gratis', (req, res) => {
   const { shots } = getConfig();
-  pendingActivation = shots;
+  pendingActivation += shots;
   res.send('Activado (' + shots + ' pulsos)');
 });
 
@@ -119,7 +123,7 @@ app.post('/webhook', (req, res) => {
         if (p.data.status === 'approved') {
           pagosProcesados.add(paymentId);
           const { shots } = getConfig();
-          pendingActivation = shots;
+          pendingActivation += shots; // Fix: += acumula, no pisa
           console.log('Activando:', shots, 'pulsos');
           crearOrden();
         }
@@ -132,3 +136,4 @@ app.listen(process.env.PORT || 3000, '0.0.0.0', () => {
   console.log('Server running');
   crearOrden();
 });
+
