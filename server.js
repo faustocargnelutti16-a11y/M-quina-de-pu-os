@@ -9,7 +9,7 @@ const MP_TOKEN = process.env.MP_ACCESS_TOKEN || 'APP_USR-3958198239703250-041419
 const USER_ID = 458533297;
 const STORE_ID = 73977333;
 
-const BASE_URL = 'https://m-quina-de-pu-os-production-8483.up.railway.app';
+const BASE_URL = 'https://m-quina-de-pu-os-production-fcd6.up.railway.app';
 const H = { headers: { Authorization: 'Bearer ' + MP_TOKEN, 'Content-Type': 'application/json' } };
 
 // ===== COMBOS: cada caja se detecta SOLA por su nombre en MP =====
