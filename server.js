@@ -9,25 +9,28 @@ const MP_TOKEN = process.env.MP_ACCESS_TOKEN || 'APP_USR-3958198239703250-041419
 const USER_ID = 458533297;
 const STORE_ID = 73977333;
 
-const BASE_URL = 'https://m-quina-de-pu-os-production-fcd6.up.railway.app';
+// BASE_URL ahora se arma solo con el dominio real que Railway le asigna en cada momento.
+// Ya no hay que tocar esto a mano nunca mas, ni siquiera si Railway regenera el dominio.
+const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN
+  ? 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN
+  : 'https://m-quina-de-pu-os-production-b489.up.railway.app';
+
 const H = { headers: { Authorization: 'Bearer ' + MP_TOKEN, 'Content-Type': 'application/json' } };
 
 // ===== COMBOS: cada caja se detecta SOLA por su nombre en MP =====
-// match = parte del nombre de la caja | monto = precio | fichas = tiros que entrega
 const COMBOS = [
-  { match: 'beerlin',  monto: 2000,  fichas: 1 },   // "BPK Beerlin"  = 1 tiro
-  { match: '3 tiros',  monto: 5500,  fichas: 3 },   // "BPK 3 tiros"
-  { match: '8 tiros',  monto: 10000, fichas: 8 },   // "BPK 8 tiros"
-  { match: '20 tiros', monto: 20000, fichas: 20 },  // "BPK 20 tiros"
+  { match: 'beerlin',  monto: 2000,  fichas: 1 },
+  { match: '3 tiros',  monto: 5500,  fichas: 3 },
+  { match: '8 tiros',  monto: 10000, fichas: 8 },
+  { match: '20 tiros', monto: 20000, fichas: 20 },
 ];
 
 let pendingActivation = 0;
-let cajas = []; // se llena solo: {external_id, monto, fichas, nombre}
+let cajas = [];
 const pagosProcesados = new Set();
 
-// ===== FRENO DE SEGURIDAD: ningun bug futuro puede pasar estos techos =====
-const MAX_FICHAS_POR_EVENTO = 20; // el combo mas grande que vendemos hoy
-const MAX_PENDING = 25;           // nunca mas que esto esperando en cola
+const MAX_FICHAS_POR_EVENTO = 20;
+const MAX_PENDING = 25;
 function agregarFichas(n) {
   const nSeguro = Math.max(0, Math.min(n, MAX_FICHAS_POR_EVENTO));
   const antes = pendingActivation;
@@ -37,24 +40,19 @@ function agregarFichas(n) {
   }
 }
 
-// Hora en Argentina (Railway corre en UTC)
 function horaArg() {
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
   return now.getHours();
 }
 
-// Cuántas fichas da un monto pagado
 function fichasPorMonto(monto) {
   const combo = COMBOS.find(function (c) { return c.monto === monto; });
   let fichas = combo ? combo.fichas : 0;
-  // HAPPY HOUR (17 a 21h): el combo de 1 tiro da 2 fichas. Los combos grandes no cambian.
-  // (si NO querés happy hour, borrá la línea de abajo)
   const h = horaArg();
   if (monto === 2000 && h >= 17 && h < 21) fichas = 2;
   return fichas;
 }
 
-// Detecta las cajas en MP y las matchea con los combos por nombre
 async function descubrirCajas() {
   try {
     const r = await axios.get('https://api.mercadopago.com/pos?store_id=' + STORE_ID, H);
@@ -72,7 +70,6 @@ async function descubrirCajas() {
   }
 }
 
-// Crea/refresca la orden de una caja (para que su QR muestre el monto)
 async function crearOrden(caja) {
   try {
     await axios.put(
@@ -104,21 +101,18 @@ async function crearOrden(caja) {
   }
 }
 
-// Refresca las ordenes de TODAS las cajas
 async function crearTodasLasOrdenes() {
   if (cajas.length === 0) await descubrirCajas();
   for (let i = 0; i < cajas.length; i++) await crearOrden(cajas[i]);
   console.log('Ordenes activas en ' + cajas.length + ' cajas');
 }
 
-// Keep-alive: refresca las ordenes cada 3 minutos (las ordenes vencen solas)
 setInterval(crearTodasLasOrdenes, 3 * 60 * 1000);
 
 // ===== ENDPOINTS =====
 
 app.get('/', function (req, res) { res.send('BPK server OK'); });
 
-// Muestra las cajas detectadas con su external_id (para chequear)
 app.get('/cajas', async function (req, res) {
   await descubrirCajas();
   res.json(cajas);
@@ -127,7 +121,7 @@ app.get('/cajas', async function (req, res) {
 app.get('/setup', async function (req, res) {
   await descubrirCajas();
   await crearTodasLasOrdenes();
-  res.json({ ok: true, cajas: cajas });
+  res.json({ ok: true, cajas: cajas, base_url: BASE_URL });
 });
 
 app.get('/orden', async function (req, res) {
@@ -139,10 +133,9 @@ app.get('/estado', function (req, res) {
   res.send('pendingActivation = ' + pendingActivation);
 });
 
-// El Shelly pregunta cada 2s. Devuelve cuantas fichas entregar DE UNA (ej "3").
 app.get('/shelly-poll', function (req, res) {
   if (pendingActivation > 0) {
-    const n = Math.min(pendingActivation, MAX_PENDING); // doble seguro, ya deberia estar acotado
+    const n = Math.min(pendingActivation, MAX_PENDING);
     pendingActivation = 0;
     res.send(String(n));
   } else {
@@ -150,7 +143,6 @@ app.get('/shelly-poll', function (req, res) {
   }
 });
 
-// Tiro gratis (mozos): SIEMPRE 1 ficha
 app.get('/gratis', function (req, res) {
   agregarFichas(1);
   res.send('Activado (1 ficha gratis)');
@@ -162,9 +154,6 @@ app.post('/webhook', function (req, res) {
   console.log('Webhook:', JSON.stringify(body));
   const paymentId = body && body.data && body.data.id;
   if ((body.type === 'payment' || body.topic === 'payment') && paymentId) {
-    // CLAVE: marcar como visto ANTES del await, no despues.
-    // Asi, si MP manda 2+ webhooks del mismo pago en simultaneo (lo hace seguido),
-    // el segundo se frena aca mismo, sin esperar a que el primero termine su consulta.
     if (pagosProcesados.has(paymentId)) { console.log('Pago repetido, ignorado'); return; }
     pagosProcesados.add(paymentId);
     axios.get('https://api.mercadopago.com/v1/payments/' + paymentId, H)
@@ -179,21 +168,20 @@ app.post('/webhook', function (req, res) {
             console.log('Pago $' + monto + ' sin combo asociado, no se dio ficha');
           }
           const caja = cajas.find(function (c) { return c.monto === monto; });
-          if (caja) crearOrden(caja); // rearma esa caja para el proximo cliente
+          if (caja) crearOrden(caja);
         } else {
-          // todavia no esta aprobado (pending, etc) -> permitir reintentar cuando SI se apruebe
           pagosProcesados.delete(paymentId);
         }
       })
       .catch(function (e) {
         console.error('Error MP:', e.message);
-        pagosProcesados.delete(paymentId); // fallo la consulta -> permitir reintento
+        pagosProcesados.delete(paymentId);
       });
   }
 });
 
 app.listen(process.env.PORT || 3000, '0.0.0.0', async function () {
-  console.log('Server running');
+  console.log('Server running. BASE_URL=' + BASE_URL);
   await descubrirCajas();
   await crearTodasLasOrdenes();
 });
