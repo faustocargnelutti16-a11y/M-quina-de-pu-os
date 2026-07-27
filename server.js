@@ -2,22 +2,32 @@ const express = require('express');
 const axios = require('axios');
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// ⚠️ SEGURIDAD: este token quedó expuesto en GitHub. Generá uno NUEVO en Mercado Pago,
-// cargalo en Railway como variable de entorno MP_ACCESS_TOKEN, y después borrá el texto de abajo.
+// ============================================================
+//  BPK / BeerPunch - servidor de creditos
+//  Version endurecida: corta sola si algo se descontrola.
+// ============================================================
+
+// ⚠️ SEGURIDAD: este token quedo expuesto en GitHub. Genera uno NUEVO en Mercado Pago,
+// cargalo en Railway como variable de entorno MP_ACCESS_TOKEN, y despues borra el texto de abajo.
 const MP_TOKEN = process.env.MP_ACCESS_TOKEN || 'APP_USR-3958198239703250-041419-e0bb2ed7830d738e9761477def48ee89-458533297';
 const USER_ID = 458533297;
 const STORE_ID = 73977333;
 
-// BASE_URL ahora se arma solo con el dominio real que Railway le asigna en cada momento.
-// Ya no hay que tocar esto a mano nunca mas, ni siquiera si Railway regenera el dominio.
+// Clave para los endpoints que dan fichas o cambian el estado.
+// Cambiala por env var BPK_CLAVE en Railway cuando puedas.
+const CLAVE = process.env.BPK_CLAVE || 'bpk2026';
+
+// El dominio se arma solo con el que Railway tenga asignado en este arranque.
+// Si Railway regenera el dominio, alcanza con reiniciar el servicio.
 const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN
-  : 'https://m-quina-de-pu-os-production-b489.up.railway.app';
+  : 'https://m-quina-de-pu-os-production-b480.up.railway.app';
 
 const H = { headers: { Authorization: 'Bearer ' + MP_TOKEN, 'Content-Type': 'application/json' } };
 
-// ===== COMBOS: cada caja se detecta SOLA por su nombre en MP =====
+// ===== COMBOS =====
 const COMBOS = [
   { match: 'beerlin',  monto: 2000,  fichas: 1 },
   { match: '3 tiros',  monto: 5500,  fichas: 3 },
@@ -25,19 +35,67 @@ const COMBOS = [
   { match: '20 tiros', monto: 20000, fichas: 20 },
 ];
 
+// ===== TOPES DE SEGURIDAD =====
+const MAX_FICHAS_POR_EVENTO = 20;   // ningun evento suelta mas que el combo mas grande
+const MAX_PENDING = 45;             // techo de la cola (2 packs de 20 juntos entran completos)
+const VENTANA_MIN = 10;             // ventana del limite de caudal
+const MAX_FICHAS_VENTANA = 100;     // fichas maximas por ventana antes de cortar
+const EDAD_MAX_PAGO_MIN = 10;       // un pago mas viejo que esto NO acredita (mata reintentos viejos)
+const COOLDOWN_GRATIS_MS = 8000;    // minimo entre dos /gratis
+
+// ===== ESTADO =====
 let pendingActivation = 0;
 let cajas = [];
-const pagosProcesados = new Set();
+let bloqueado = false;
+let motivoBloqueo = '';
+let historialFichas = [];
+let eventos = [];
+let ultimoGratis = 0;
+let ultimoPoll = 0;
+const pagosProcesados = {};
+let cantidadProcesados = 0;
+const arranque = Date.now();
 
-const MAX_FICHAS_POR_EVENTO = 20;
-const MAX_PENDING = 25;
-function agregarFichas(n) {
-  const nSeguro = Math.max(0, Math.min(n, MAX_FICHAS_POR_EVENTO));
-  const antes = pendingActivation;
-  pendingActivation = Math.min(pendingActivation + nSeguro, MAX_PENDING);
-  if (pendingActivation !== antes + nSeguro) {
-    console.warn('TECHO ALCANZADO: se pidieron ' + nSeguro + ' fichas, pendingActivation clamped a ' + pendingActivation);
+function hora() {
+  return new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
+}
+
+function log(tipo, msg) {
+  const linea = hora() + ' | ' + tipo + ' | ' + msg;
+  eventos.push(linea);
+  if (eventos.length > 200) eventos.shift();
+  console.log(linea);
+}
+
+function claveOk(req) {
+  return String(req.query.clave || '') === CLAVE;
+}
+
+// ===== ALTA DE FICHAS CON CORTE AUTOMATICO =====
+function agregarFichas(n, origen) {
+  if (bloqueado) {
+    log('BLOQUEADO', 'se intento sumar ' + n + ' fichas (' + origen + ') con el sistema frenado');
+    return false;
   }
+  const nSeguro = Math.max(0, Math.min(Math.floor(Number(n) || 0), MAX_FICHAS_POR_EVENTO));
+  if (nSeguro <= 0) return false;
+
+  const ahora = Date.now();
+  const desde = ahora - VENTANA_MIN * 60 * 1000;
+  historialFichas = historialFichas.filter(function (t) { return t > desde; });
+
+  if (historialFichas.length + nSeguro > MAX_FICHAS_VENTANA) {
+    bloqueado = true;
+    motivoBloqueo = 'Mas de ' + MAX_FICHAS_VENTANA + ' fichas en ' + VENTANA_MIN + ' minutos';
+    pendingActivation = 0;
+    log('CORTE', motivoBloqueo + '. Entrega detenida. Revisar /log y reactivar con /reanudar?clave=' + '***');
+    return false;
+  }
+
+  for (let i = 0; i < nSeguro; i++) historialFichas.push(ahora);
+  pendingActivation = Math.min(pendingActivation + nSeguro, MAX_PENDING);
+  log('FICHAS', '+' + nSeguro + ' (' + origen + ') -> cola=' + pendingActivation);
+  return true;
 }
 
 function horaArg() {
@@ -49,10 +107,11 @@ function fichasPorMonto(monto) {
   const combo = COMBOS.find(function (c) { return c.monto === monto; });
   let fichas = combo ? combo.fichas : 0;
   const h = horaArg();
-  if (monto === 2000 && h >= 17 && h < 21) fichas = 2;
+  if (monto === 2000 && h >= 17 && h < 21) fichas = 2; // happy hour, solo QR
   return fichas;
 }
 
+// ===== MERCADO PAGO =====
 async function descubrirCajas() {
   try {
     const r = await axios.get('https://api.mercadopago.com/pos?store_id=' + STORE_ID, H);
@@ -62,10 +121,10 @@ async function descubrirCajas() {
       const combo = COMBOS.find(function (c) { return nombre.indexOf(c.match) !== -1; });
       if (combo) cajas.push({ external_id: pos.external_id, monto: combo.monto, fichas: combo.fichas, nombre: pos.name });
     });
-    console.log('Cajas detectadas:', cajas.map(function (c) { return c.nombre + ' $' + c.monto + ' (' + c.external_id + ')'; }).join(' | '));
+    log('CAJAS', cajas.map(function (c) { return c.nombre + ' $' + c.monto + ' (' + c.external_id + ')'; }).join(' | '));
     return cajas;
   } catch (e) {
-    console.error('Error descubriendo cajas:', e.message);
+    log('ERROR', 'descubriendo cajas: ' + e.message);
     return [];
   }
 }
@@ -96,7 +155,7 @@ async function crearOrden(caja) {
     );
     return true;
   } catch (e) {
-    console.error('Error orden ' + caja.nombre + ':', e.response ? JSON.stringify(e.response.data) : e.message);
+    log('ERROR', 'orden ' + caja.nombre + ': ' + (e.response ? JSON.stringify(e.response.data) : e.message));
     return false;
   }
 }
@@ -104,7 +163,7 @@ async function crearOrden(caja) {
 async function crearTodasLasOrdenes() {
   if (cajas.length === 0) await descubrirCajas();
   for (let i = 0; i < cajas.length; i++) await crearOrden(cajas[i]);
-  console.log('Ordenes activas en ' + cajas.length + ' cajas');
+  log('ORDENES', 'activas en ' + cajas.length + ' cajas');
 }
 
 setInterval(crearTodasLasOrdenes, 3 * 60 * 1000);
@@ -129,59 +188,141 @@ app.get('/orden', async function (req, res) {
   res.send('Ordenes creadas en ' + cajas.length + ' cajas');
 });
 
+// Estado completo, legible desde el celular
 app.get('/estado', function (req, res) {
-  res.send('pendingActivation = ' + pendingActivation);
+  const desde = Date.now() - VENTANA_MIN * 60 * 1000;
+  const ultimas = historialFichas.filter(function (t) { return t > desde; }).length;
+  const segDesdePoll = ultimoPoll ? Math.round((Date.now() - ultimoPoll) / 1000) : -1;
+  res.type('text/plain').send(
+    'pendingActivation = ' + pendingActivation + '\n' +
+    'bloqueado = ' + (bloqueado ? 'SI -> ' + motivoBloqueo : 'no') + '\n' +
+    'fichas ultimos ' + VENTANA_MIN + ' min = ' + ultimas + ' (tope ' + MAX_FICHAS_VENTANA + ')\n' +
+    'ultimo poll del Shelly = ' + (segDesdePoll < 0 ? 'nunca' : 'hace ' + segDesdePoll + ' s') + '\n' +
+    'base_url = ' + BASE_URL + '\n' +
+    'arranque = ' + new Date(arranque).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' }) + '\n' +
+    'hora servidor = ' + hora()
+  );
 });
 
+// Historial de eventos: aca se ve QUE esta inyectando fichas
+app.get('/log', function (req, res) {
+  res.type('text/plain').send(eventos.length ? eventos.slice().reverse().join('\n') : 'sin eventos todavia');
+});
+
+// El Shelly consulta aca. Devuelve SIEMPRE un numero (0 si no hay nada).
 app.get('/shelly-poll', function (req, res) {
+  ultimoPoll = Date.now();
+  if (bloqueado) { res.type('text/plain').send('0'); return; }
   if (pendingActivation > 0) {
     const n = Math.min(pendingActivation, MAX_PENDING);
     pendingActivation = 0;
-    res.send(String(n));
+    log('ENTREGA', n + ' fichas entregadas al Shelly');
+    res.type('text/plain').send(String(n));
   } else {
-    res.send('ok');
+    res.type('text/plain').send('0');
   }
 });
 
+// Tiro gratis: ahora pide clave y tiene cooldown
 app.get('/gratis', function (req, res) {
-  agregarFichas(1);
-  res.send('Activado (1 ficha gratis)');
+  if (!claveOk(req)) { log('RECHAZO', '/gratis sin clave valida'); return res.status(403).send('clave invalida'); }
+  const ahora = Date.now();
+  if (ahora - ultimoGratis < COOLDOWN_GRATIS_MS) {
+    log('RECHAZO', '/gratis demasiado seguido');
+    return res.send('esperá unos segundos antes de otra activación');
+  }
+  ultimoGratis = ahora;
+  const ok = agregarFichas(1, 'gratis');
+  res.send(ok ? 'Activado (1 ficha gratis)' : 'No se activó (sistema frenado o tope alcanzado)');
 });
 
+// Freno de emergencia desde el celular, sin cortar la luz
+app.get('/pausa', function (req, res) {
+  if (!claveOk(req)) return res.status(403).send('clave invalida');
+  bloqueado = true;
+  motivoBloqueo = 'pausa manual';
+  pendingActivation = 0;
+  log('PAUSA', 'freno manual activado');
+  res.send('Sistema PAUSADO. No se entregan mas creditos hasta /reanudar');
+});
+
+app.get('/reanudar', function (req, res) {
+  if (!claveOk(req)) return res.status(403).send('clave invalida');
+  bloqueado = false;
+  motivoBloqueo = '';
+  historialFichas = [];
+  pendingActivation = 0;
+  log('REANUDAR', 'sistema reactivado a mano');
+  res.send('Sistema REANUDADO, cola en 0');
+});
+
+app.get('/reset', function (req, res) {
+  if (!claveOk(req)) return res.status(403).send('clave invalida');
+  pendingActivation = 0;
+  log('RESET', 'cola vaciada a mano');
+  res.send('Cola en 0');
+});
+
+// ===== WEBHOOK DE MERCADO PAGO =====
 app.post('/webhook', function (req, res) {
   res.sendStatus(200);
-  const body = req.body;
-  console.log('Webhook:', JSON.stringify(body));
+  const body = req.body || {};
   const paymentId = body && body.data && body.data.id;
-  if ((body.type === 'payment' || body.topic === 'payment') && paymentId) {
-    if (pagosProcesados.has(paymentId)) { console.log('Pago repetido, ignorado'); return; }
-    pagosProcesados.add(paymentId);
-    axios.get('https://api.mercadopago.com/v1/payments/' + paymentId, H)
-      .then(function (p) {
-        if (p.data.status === 'approved') {
-          const monto = p.data.transaction_amount;
-          const fichas = fichasPorMonto(monto);
-          if (fichas > 0) {
-            agregarFichas(fichas);
-            console.log('Pago $' + monto + ' -> ' + fichas + ' fichas');
-          } else {
-            console.log('Pago $' + monto + ' sin combo asociado, no se dio ficha');
-          }
-          const caja = cajas.find(function (c) { return c.monto === monto; });
-          if (caja) crearOrden(caja);
-        } else {
-          pagosProcesados.delete(paymentId);
-        }
-      })
-      .catch(function (e) {
-        console.error('Error MP:', e.message);
-        pagosProcesados.delete(paymentId);
-      });
+  if (!((body.type === 'payment' || body.topic === 'payment') && paymentId)) return;
+
+  const idStr = String(paymentId);
+  if (pagosProcesados[idStr]) { log('REPETIDO', 'pago ' + idStr + ' ya procesado, ignorado'); return; }
+  pagosProcesados[idStr] = true;
+  cantidadProcesados++;
+  if (cantidadProcesados > 5000) {
+    for (const k in pagosProcesados) delete pagosProcesados[k];
+    cantidadProcesados = 0;
+    log('LIMPIEZA', 'lista de pagos procesados vaciada');
   }
+
+  axios.get('https://api.mercadopago.com/v1/payments/' + idStr, H)
+    .then(function (p) {
+      const d = p.data || {};
+
+      if (d.status !== 'approved') {
+        delete pagosProcesados[idStr];
+        log('PENDIENTE', 'pago ' + idStr + ' estado ' + d.status + ', se reintentara cuando se apruebe');
+        return;
+      }
+
+      // FILTRO 1: pagos viejos no acreditan (mata los reintentos acumulados de MP)
+      const fecha = d.date_approved || d.date_created;
+      const edadMin = fecha ? (Date.now() - new Date(fecha).getTime()) / 60000 : 0;
+      if (edadMin > EDAD_MAX_PAGO_MIN) {
+        log('VIEJO', 'pago ' + idStr + ' aprobado hace ' + Math.round(edadMin) + ' min -> NO acredita');
+        return;
+      }
+
+      // FILTRO 2: solo pagos originados en las cajas de BPK
+      const ref = String(d.external_reference || '');
+      if (ref && ref.indexOf('BPK-') !== 0) {
+        log('AJENO', 'pago ' + idStr + ' ref=' + ref + ' no es de BPK -> NO acredita');
+        return;
+      }
+
+      const monto = d.transaction_amount;
+      const fichas = fichasPorMonto(monto);
+      if (fichas > 0) {
+        agregarFichas(fichas, 'pago $' + monto + ' id=' + idStr);
+      } else {
+        log('SIN COMBO', 'pago $' + monto + ' no coincide con ningun combo');
+      }
+      const caja = cajas.find(function (c) { return c.monto === monto; });
+      if (caja) crearOrden(caja);
+    })
+    .catch(function (e) {
+      delete pagosProcesados[idStr];
+      log('ERROR MP', 'consultando pago ' + idStr + ': ' + e.message);
+    });
 });
 
 app.listen(process.env.PORT || 3000, '0.0.0.0', async function () {
-  console.log('Server running. BASE_URL=' + BASE_URL);
+  log('ARRANQUE', 'Server running. BASE_URL=' + BASE_URL);
   await descubrirCajas();
   await crearTodasLasOrdenes();
 });
