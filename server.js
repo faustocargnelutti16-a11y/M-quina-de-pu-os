@@ -9,15 +9,17 @@ app.use(express.urlencoded({ extended: true }));
 //  Version endurecida: corta sola si algo se descontrola.
 // ============================================================
 
-// ⚠️ SEGURIDAD: este token quedo expuesto en GitHub. Genera uno NUEVO en Mercado Pago,
-// cargalo en Railway como variable de entorno MP_ACCESS_TOKEN, y despues borra el texto de abajo.
+// ⚠️ SEGURIDAD: este token quedo expuesto en GitHub. Cuando tu papa pueda hacer
+// la verificacion facial en Mercado Pago, generen uno nuevo y carguenlo en Railway
+// como variable de entorno MP_ACCESS_TOKEN. Por ahora, mientras no se pueda,
+// el server usa este mismo token viejo para no dejar la maquina sin funcionar.
 const MP_TOKEN = process.env.MP_ACCESS_TOKEN || 'APP_USR-3958198239703250-041419-e0bb2ed7830d738e9761477def48ee89-458533297';
 const USER_ID = 458533297;
 const STORE_ID = 73977333;
 
-// Clave para los endpoints que dan fichas o cambian el estado.
-// Cambiala por env var BPK_CLAVE en Railway cuando puedas.
-const CLAVE = process.env.BPK_CLAVE || 'bpk2026';
+// La clave de los endpoints es OPCIONAL. Si cargás BPK_CLAVE en Railway, esos
+// endpoints la van a exigir. Si no la cargás, funcionan libres (decisión del dueño).
+const CLAVE = process.env.BPK_CLAVE || null;
 
 // El dominio se arma solo con el que Railway tenga asignado en este arranque.
 // Si Railway regenera el dominio, alcanza con reiniciar el servicio.
@@ -68,6 +70,7 @@ function log(tipo, msg) {
 }
 
 function claveOk(req) {
+  if (!CLAVE) return true; // sin clave configurada, no se exige nada
   return String(req.query.clave || '') === CLAVE;
 }
 
@@ -267,6 +270,12 @@ app.get('/reset', function (req, res) {
 app.post('/webhook', function (req, res) {
   res.sendStatus(200);
   const body = req.body || {};
+  // Log de TODO lo que llega, sea del tipo que sea. Antes esto se ignoraba en
+  // silencio si no era exactamente type=payment, y un aviso raro (por ejemplo
+  // de un pago pagado desde otra billetera vía QR interoperable) desaparecia
+  // sin dejar rastro. Ahora siempre queda registrado en /log.
+  log('WEBHOOK RAW', JSON.stringify(body).slice(0, 300));
+
   const paymentId = body && body.data && body.data.id;
   if (!((body.type === 'payment' || body.topic === 'payment') && paymentId)) return;
 
