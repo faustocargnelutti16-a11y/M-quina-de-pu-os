@@ -270,10 +270,14 @@ app.get('/reset', function (req, res) {
 app.post('/webhook', function (req, res) {
   res.sendStatus(200);
   const body = req.body || {};
-  // Log de TODO lo que llega, sea del tipo que sea. Antes esto se ignoraba en
-  // silencio si no era exactamente type=payment, y un aviso raro (por ejemplo
-  // de un pago pagado desde otra billetera vía QR interoperable) desaparecia
-  // sin dejar rastro. Ahora siempre queda registrado en /log.
+
+  // "merchant_order" es ruido de Mercado Libre/Pago ajeno a nuestras 4 cajas.
+  // Lo identificamos y lo descartamos de una, sin loguear ni gastar mas ciclos,
+  // para no ensuciar /log ni sumar consumo en Railway por nada.
+  if (body.topic === 'merchant_order') return;
+
+  // Log de TODO lo demas que llegue, sea del tipo que sea. Asi, si aparece
+  // algo realmente nuevo y raro, queda registrado en /log para diagnosticar.
   log('WEBHOOK RAW', JSON.stringify(body).slice(0, 300));
 
   const paymentId = body && body.data && body.data.id;
