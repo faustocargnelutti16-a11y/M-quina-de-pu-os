@@ -1,31 +1,35 @@
 const express = require('express');
 const axios = require('axios');
+const crypto = require('crypto');
 const app = express();
-app.use(express.json());
+
+// Guardamos el cuerpo crudo: hace falta para validar la firma de Mercado Pago.
+app.use(express.json({
+  verify: function (req, res, buf) { req.rawBody = buf.toString('utf8'); }
+}));
 app.use(express.urlencoded({ extended: true }));
 
 // ============================================================
 //  BPK / BeerPunch - servidor de creditos
-//  Version endurecida: corta sola si algo se descontrola.
+//  v3: entrega confirmada (ack), firma de MP, sin fallbacks muertos.
 // ============================================================
 
-// ⚠️ SEGURIDAD: este token quedo expuesto en GitHub. Cuando tu papa pueda hacer
-// la verificacion facial en Mercado Pago, generen uno nuevo y carguenlo en Railway
-// como variable de entorno MP_ACCESS_TOKEN. Por ahora, mientras no se pueda,
-// el server usa este mismo token viejo para no dejar la maquina sin funcionar.
-const MP_TOKEN = process.env.MP_ACCESS_TOKEN || 'APP_USR-3958198239703250-041419-e0bb2ed7830d738e9761477def48ee89-458533297';
+// ===== CREDENCIALES =====
+// Sin fallback al token viejo: ese token ya fue rotado y no sirve.
+// Si falta la variable, es mejor gritar que fallar en silencio.
+const MP_TOKEN = process.env.MP_ACCESS_TOKEN || '';
+const MP_SECRET = process.env.MP_WEBHOOK_SECRET || '';
+const MP_ENFORCE = String(process.env.MP_WEBHOOK_ENFORCE || '') === 'true';
 const USER_ID = 458533297;
 const STORE_ID = 73977333;
 
-// La clave de los endpoints es OPCIONAL. Si cargás BPK_CLAVE en Railway, esos
-// endpoints la van a exigir. Si no la cargás, funcionan libres (decisión del dueño).
 const CLAVE = process.env.BPK_CLAVE || null;
 
-// El dominio se arma solo con el que Railway tenga asignado en este arranque.
-// Si Railway regenera el dominio, alcanza con reiniciar el servicio.
+// El dominio lo pone Railway. Sin fallback a un dominio muerto:
+// si falta, queda vacio y el /estado lo canta enseguida.
 const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN
-  : 'https://m-quina-de-pu-os-production-b480.up.railway.app';
+  : '';
 
 const H = { headers: { Authorization: 'Bearer ' + MP_TOKEN, 'Content-Type': 'application/json' } };
 
@@ -38,15 +42,17 @@ const COMBOS = [
 ];
 
 // ===== TOPES DE SEGURIDAD =====
-const MAX_FICHAS_POR_EVENTO = 20;   // ningun evento suelta mas que el combo mas grande
-const MAX_PENDING = 45;             // techo de la cola (2 packs de 20 juntos entran completos)
-const VENTANA_MIN = 10;             // ventana del limite de caudal
-const MAX_FICHAS_VENTANA = 100;     // fichas maximas por ventana antes de cortar
-const EDAD_MAX_PAGO_MIN = 10;       // un pago mas viejo que esto NO acredita (mata reintentos viejos)
-const COOLDOWN_GRATIS_MS = 8000;    // minimo entre dos /gratis
+const MAX_FICHAS_POR_EVENTO = 20;
+const MAX_PENDING = 45;
+const VENTANA_MIN = 10;
+const MAX_FICHAS_VENTANA = 100;
+const EDAD_MAX_PAGO_MIN = 10;
+const COOLDOWN_GRATIS_MS = 8000;
+const REINTENTO_ENTREGA_MS = 30000; // si el Shelly no confirma en 30s, se le reofrece
 
 // ===== ESTADO =====
 let pendingActivation = 0;
+let entregaEnVuelo = null;   // { n, ts, intentos } -> fichas mandadas y aun sin confirmar
 let cajas = [];
 let bloqueado = false;
 let motivoBloqueo = '';
@@ -70,7 +76,7 @@ function log(tipo, msg) {
 }
 
 function claveOk(req) {
-  if (!CLAVE) return true; // sin clave configurada, no se exige nada
+  if (!CLAVE) return true;
   return String(req.query.clave || '') === CLAVE;
 }
 
@@ -91,7 +97,8 @@ function agregarFichas(n, origen) {
     bloqueado = true;
     motivoBloqueo = 'Mas de ' + MAX_FICHAS_VENTANA + ' fichas en ' + VENTANA_MIN + ' minutos';
     pendingActivation = 0;
-    log('CORTE', motivoBloqueo + '. Entrega detenida. Revisar /log y reactivar con /reanudar?clave=' + '***');
+    entregaEnVuelo = null;
+    log('CORTE', motivoBloqueo + '. Entrega detenida. Revisar /log y reactivar con /reanudar');
     return false;
   }
 
@@ -114,6 +121,39 @@ function fichasPorMonto(monto) {
   return fichas;
 }
 
+// ===== FIRMA DE MERCADO PAGO =====
+// MP manda: x-signature: "ts=...,v1=..." y x-request-id.
+// El manifest es: id:<data.id>;request-id:<x-request-id>;ts:<ts>;
+function firmaValida(req, paymentId) {
+  if (!MP_SECRET) return null; // sin secreto cargado, no se puede validar
+  try {
+    const sig = String(req.headers['x-signature'] || '');
+    const reqId = String(req.headers['x-request-id'] || '');
+    let ts = '';
+    let v1 = '';
+    sig.split(',').forEach(function (parte) {
+      const kv = parte.split('=');
+      if (kv.length !== 2) return;
+      const k = kv[0].trim();
+      const v = kv[1].trim();
+      if (k === 'ts') ts = v;
+      if (k === 'v1') v1 = v;
+    });
+    if (!ts || !v1) return false;
+
+    const manifest = 'id:' + String(paymentId).toLowerCase() + ';request-id:' + reqId + ';ts:' + ts + ';';
+    const esperado = crypto.createHmac('sha256', MP_SECRET).update(manifest).digest('hex');
+
+    const a = Buffer.from(esperado, 'utf8');
+    const b = Buffer.from(v1, 'utf8');
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+  } catch (e) {
+    log('ERROR FIRMA', e.message);
+    return false;
+  }
+}
+
 // ===== MERCADO PAGO =====
 async function descubrirCajas() {
   try {
@@ -133,6 +173,7 @@ async function descubrirCajas() {
 }
 
 async function crearOrden(caja) {
+  if (!BASE_URL) { log('ERROR', 'sin BASE_URL: no se crean ordenes'); return false; }
   try {
     await axios.put(
       'https://api.mercadopago.com/instore/qr/seller/collectors/' + USER_ID + '/pos/' + caja.external_id + '/orders',
@@ -191,60 +232,88 @@ app.get('/orden', async function (req, res) {
   res.send('Ordenes creadas en ' + cajas.length + ' cajas');
 });
 
-// Estado completo, legible desde el celular
 app.get('/estado', function (req, res) {
   const desde = Date.now() - VENTANA_MIN * 60 * 1000;
   const ultimas = historialFichas.filter(function (t) { return t > desde; }).length;
   const segDesdePoll = ultimoPoll ? Math.round((Date.now() - ultimoPoll) / 1000) : -1;
   res.type('text/plain').send(
     'pendingActivation = ' + pendingActivation + '\n' +
+    'en vuelo (sin confirmar) = ' + (entregaEnVuelo ? entregaEnVuelo.n + ' fichas, hace ' + Math.round((Date.now() - entregaEnVuelo.ts) / 1000) + ' s' : 'ninguna') + '\n' +
     'bloqueado = ' + (bloqueado ? 'SI -> ' + motivoBloqueo : 'no') + '\n' +
     'fichas ultimos ' + VENTANA_MIN + ' min = ' + ultimas + ' (tope ' + MAX_FICHAS_VENTANA + ')\n' +
     'ultimo poll del Shelly = ' + (segDesdePoll < 0 ? 'nunca' : 'hace ' + segDesdePoll + ' s') + '\n' +
-    'base_url = ' + BASE_URL + '\n' +
+    'base_url = ' + (BASE_URL || '*** FALTA RAILWAY_PUBLIC_DOMAIN ***') + '\n' +
+    'token MP = ' + (MP_TOKEN ? 'cargado' : '*** FALTA MP_ACCESS_TOKEN ***') + '\n' +
+    'firma MP = ' + (!MP_SECRET ? 'sin secreto' : (MP_ENFORCE ? 'ENFORCE (bloquea)' : 'modo prueba (solo loguea)')) + '\n' +
     'arranque = ' + new Date(arranque).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' }) + '\n' +
     'hora servidor = ' + hora()
   );
 });
 
-// Historial de eventos: aca se ve QUE esta inyectando fichas
 app.get('/log', function (req, res) {
   res.type('text/plain').send(eventos.length ? eventos.slice().reverse().join('\n') : 'sin eventos todavia');
 });
 
-// El Shelly consulta aca. Devuelve SIEMPRE un numero (0 si no hay nada).
+// ===== ENTREGA CON CONFIRMACION =====
+// El Shelly pide fichas aca. Las fichas NO se dan por perdidas hasta que
+// el Shelly confirme con /shelly-ack que las pulso de verdad.
 app.get('/shelly-poll', function (req, res) {
   ultimoPoll = Date.now();
   if (bloqueado) { res.type('text/plain').send('0'); return; }
+
+  // Hay una entrega mandada que todavia no confirmo
+  if (entregaEnVuelo) {
+    const edad = Date.now() - entregaEnVuelo.ts;
+    if (edad > REINTENTO_ENTREGA_MS) {
+      entregaEnVuelo.ts = Date.now();
+      entregaEnVuelo.intentos++;
+      log('REENVIO', 'el Shelly no confirmo ' + entregaEnVuelo.n + ' fichas, se reofrecen (intento ' + entregaEnVuelo.intentos + ')');
+      res.type('text/plain').send(String(entregaEnVuelo.n));
+      return;
+    }
+    res.type('text/plain').send('0'); // esperando confirmacion, no mandar nada nuevo
+    return;
+  }
+
   if (pendingActivation > 0) {
     const n = Math.min(pendingActivation, MAX_PENDING);
     pendingActivation = 0;
-    log('ENTREGA', n + ' fichas entregadas al Shelly');
+    entregaEnVuelo = { n: n, ts: Date.now(), intentos: 1 };
+    log('ENVIO', n + ' fichas mandadas al Shelly, esperando confirmacion');
     res.type('text/plain').send(String(n));
-  } else {
-    res.type('text/plain').send('0');
+    return;
   }
+
+  res.type('text/plain').send('0');
 });
 
-// Tiro gratis: ahora pide clave y tiene cooldown
+// El Shelly confirma que ya pulso. Recien aca se dan por entregadas.
+app.get('/shelly-ack', function (req, res) {
+  if (entregaEnVuelo) {
+    log('ENTREGADO', entregaEnVuelo.n + ' fichas confirmadas por el Shelly');
+    entregaEnVuelo = null;
+  }
+  res.type('text/plain').send('ok');
+});
+
 app.get('/gratis', function (req, res) {
   if (!claveOk(req)) { log('RECHAZO', '/gratis sin clave valida'); return res.status(403).send('clave invalida'); }
   const ahora = Date.now();
   if (ahora - ultimoGratis < COOLDOWN_GRATIS_MS) {
     log('RECHAZO', '/gratis demasiado seguido');
-    return res.send('esperá unos segundos antes de otra activación');
+    return res.send('espera unos segundos antes de otra activacion');
   }
   ultimoGratis = ahora;
   const ok = agregarFichas(1, 'gratis');
-  res.send(ok ? 'Activado (1 ficha gratis)' : 'No se activó (sistema frenado o tope alcanzado)');
+  res.send(ok ? 'Activado (1 ficha gratis)' : 'No se activo (sistema frenado o tope alcanzado)');
 });
 
-// Freno de emergencia desde el celular, sin cortar la luz
 app.get('/pausa', function (req, res) {
   if (!claveOk(req)) return res.status(403).send('clave invalida');
   bloqueado = true;
   motivoBloqueo = 'pausa manual';
   pendingActivation = 0;
+  entregaEnVuelo = null;
   log('PAUSA', 'freno manual activado');
   res.send('Sistema PAUSADO. No se entregan mas creditos hasta /reanudar');
 });
@@ -255,6 +324,7 @@ app.get('/reanudar', function (req, res) {
   motivoBloqueo = '';
   historialFichas = [];
   pendingActivation = 0;
+  entregaEnVuelo = null;
   log('REANUDAR', 'sistema reactivado a mano');
   res.send('Sistema REANUDADO, cola en 0');
 });
@@ -262,6 +332,7 @@ app.get('/reanudar', function (req, res) {
 app.get('/reset', function (req, res) {
   if (!claveOk(req)) return res.status(403).send('clave invalida');
   pendingActivation = 0;
+  entregaEnVuelo = null;
   log('RESET', 'cola vaciada a mano');
   res.send('Cola en 0');
 });
@@ -271,19 +342,26 @@ app.post('/webhook', function (req, res) {
   res.sendStatus(200);
   const body = req.body || {};
 
-  // "merchant_order" es ruido de Mercado Libre/Pago ajeno a nuestras 4 cajas.
-  // Lo identificamos y lo descartamos de una, sin loguear ni gastar mas ciclos,
-  // para no ensuciar /log ni sumar consumo en Railway por nada.
   if (body.topic === 'merchant_order') return;
 
-  // Log de TODO lo demas que llegue, sea del tipo que sea. Asi, si aparece
-  // algo realmente nuevo y raro, queda registrado en /log para diagnosticar.
   log('WEBHOOK RAW', JSON.stringify(body).slice(0, 300));
 
   const paymentId = body && body.data && body.data.id;
   if (!((body.type === 'payment' || body.topic === 'payment') && paymentId)) return;
 
   const idStr = String(paymentId);
+
+  // --- Validacion de firma ---
+  const ok = firmaValida(req, idStr);
+  if (ok === null) {
+    log('FIRMA', 'sin MP_WEBHOOK_SECRET cargado, no se valida');
+  } else if (ok === true) {
+    log('FIRMA', 'valida (pago ' + idStr + ')');
+  } else {
+    log('FIRMA', 'INVALIDA (pago ' + idStr + ')' + (MP_ENFORCE ? ' -> RECHAZADO' : ' -> modo prueba, se deja pasar'));
+    if (MP_ENFORCE) return;
+  }
+
   if (pagosProcesados[idStr]) { log('REPETIDO', 'pago ' + idStr + ' ya procesado, ignorado'); return; }
   pagosProcesados[idStr] = true;
   cantidadProcesados++;
@@ -303,7 +381,6 @@ app.post('/webhook', function (req, res) {
         return;
       }
 
-      // FILTRO 1: pagos viejos no acreditan (mata los reintentos acumulados de MP)
       const fecha = d.date_approved || d.date_created;
       const edadMin = fecha ? (Date.now() - new Date(fecha).getTime()) / 60000 : 0;
       if (edadMin > EDAD_MAX_PAGO_MIN) {
@@ -311,7 +388,6 @@ app.post('/webhook', function (req, res) {
         return;
       }
 
-      // FILTRO 2: solo pagos originados en las cajas de BPK
       const ref = String(d.external_reference || '');
       if (ref && ref.indexOf('BPK-') !== 0) {
         log('AJENO', 'pago ' + idStr + ' ref=' + ref + ' no es de BPK -> NO acredita');
@@ -335,7 +411,9 @@ app.post('/webhook', function (req, res) {
 });
 
 app.listen(process.env.PORT || 3000, '0.0.0.0', async function () {
-  log('ARRANQUE', 'Server running. BASE_URL=' + BASE_URL);
+  log('ARRANQUE', 'Server running. BASE_URL=' + (BASE_URL || 'FALTA'));
+  if (!MP_TOKEN) log('ALERTA', 'FALTA MP_ACCESS_TOKEN: no va a poder hablar con Mercado Pago');
+  if (!BASE_URL) log('ALERTA', 'FALTA RAILWAY_PUBLIC_DOMAIN: no se pueden crear ordenes');
   await descubrirCajas();
   await crearTodasLasOrdenes();
 });
