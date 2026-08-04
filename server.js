@@ -12,6 +12,7 @@ app.use(express.urlencoded({ extended: true }));
 // ============================================================
 //  BPK / BeerPunch - servidor de creditos
 //  v3: entrega confirmada (ack), firma de MP, sin fallbacks muertos.
+//  v4: sistema de activaciones (cupones con QR de un solo uso).
 // ============================================================
 
 // ===== CREDENCIALES =====
@@ -107,6 +108,16 @@ function agregarFichas(n, origen) {
   log('FICHAS', '+' + nSeguro + ' (' + origen + ') -> cola=' + pendingActivation);
   return true;
 }
+
+// ============================================================
+//  SISTEMA DE ACTIVACIONES (cupones impresos con QR unico)
+//  Requiere activaciones.js y qr.js en la misma carpeta.
+//  Endpoints que suma: /c/:codigo /canjear/:codigo /activar/:codigo
+//                      /activaciones /activaciones/json /activaciones/importar
+//  No toca nada de lo de arriba: entra por agregarFichas, igual que un pago.
+// ============================================================
+const activaciones = require('./activaciones');
+app.use(activaciones({ agregarFichas: agregarFichas }));
 
 function horaArg() {
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
