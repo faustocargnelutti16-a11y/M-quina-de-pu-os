@@ -712,6 +712,51 @@ module.exports = function crearActivaciones(deps) {
     res.json({ ok: true, agregados, existentes, total: Object.keys(db.codigos).length });
   });
 
+  /* ---------- CARGAR UN LOTE DESDE EL NAVEGADOR ----------
+     El importador por POST necesita curl desde una compu. Este pega los
+     códigos por la URL, que es lo único que se puede hacer desde el celular.
+     Mismo comportamiento: no pisa códigos que ya existen.                */
+  router.get('/activaciones/cargar', function (req, res) {
+    if (!chequearToken(req, res)) return;
+
+    const lista = String(req.query.codigos || '')
+      .split(/[\s,;]+/)
+      .map(function (c) { return c.toUpperCase().trim(); })
+      .filter(Boolean);
+
+    if (!lista.length) {
+      return res.type('text/plain').send(
+        'Faltan códigos.\n\n' +
+        'Uso: /activaciones/cargar?clave=TU_CLAVE&lote=L1&codigos=ABC12,DEF34,GHI56\n' +
+        '(separados por coma, sin espacios)'
+      );
+    }
+
+    let agregados = 0, existentes = 0;
+    const lote = String(req.query.lote || 'L1').toUpperCase();
+    lista.forEach(function (cod) {
+      if (db.codigos[cod]) { existentes++; return; }
+      db.codigos[cod] = {
+        lote: lote, estado: 'virgen', escaneadoEn: null,
+        activadoEn: null, noche: null, sesion: null,
+      };
+      agregados++;
+    });
+
+    db.lote = lote;
+    db.generadoEn = db.generadoEn || new Date().toISOString();
+    guardarDB();
+    console.log('[ACT] Cargados por URL:', agregados, 'nuevos,', existentes, 'ya existían');
+
+    res.type('text/plain').send(
+      'LISTO\n\n' +
+      'Lote: ' + lote + '\n' +
+      'Agregados: ' + agregados + '\n' +
+      'Ya existían (no se tocaron): ' + existentes + '\n' +
+      'Total en el sistema: ' + Object.keys(db.codigos).length
+    );
+  });
+
   console.log('[ACT] Sistema de activaciones montado. Datos en', ARCHIVO,
     CONFIG.MODO_PRUEBA ? '— ⚠ MODO PRUEBA (sin ventana horaria)' : '');
 
