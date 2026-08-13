@@ -69,14 +69,27 @@ const F_VENTAS = path.join(DATA_DIR, 'ventas.json');
 // Historial de cuando la maquina se apago y se prendio. Sirve para ver a que
 // hora la estan apagando de verdad, que no siempre coincide con el cierre.
 const F_ENCENDIDOS = path.join(DATA_DIR, 'encendidos.json');
+// OJO: no creamos la carpeta. Si /data no existe, significa que el volumen de
+// Railway NO esta montado ahi. Si la crearamos, se podria escribir igual pero
+// se borraria en cada reinicio, y el panel diria "guardada" mintiendo.
 let persistenciaOk = false;
+let motivoSinPersistencia = '';
 
 try {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.accessSync(DATA_DIR, fs.constants.W_OK);
-  persistenciaOk = true;
+  if (!fs.existsSync(DATA_DIR)) {
+    motivoSinPersistencia = 'no existe la carpeta /data: falta montar el volumen en Railway';
+  } else {
+    fs.accessSync(DATA_DIR, fs.constants.W_OK);
+    // Prueba real de escritura y lectura, no alcanza con que la carpeta este.
+    const prueba = path.join(DATA_DIR, '.prueba');
+    fs.writeFileSync(prueba, 'ok');
+    if (fs.readFileSync(prueba, 'utf8') !== 'ok') throw new Error('no se pudo releer');
+    fs.unlinkSync(prueba);
+    persistenciaOk = true;
+  }
 } catch (e) {
   persistenciaOk = false;
+  motivoSinPersistencia = e.message;
 }
 
 function leerJSON(archivo, porDefecto) {
@@ -695,7 +708,7 @@ app.get('/estado', function (req, res) {
     'base_url = ' + (BASE_URL || '*** FALTA RAILWAY_PUBLIC_DOMAIN ***') + '\n' +
     'token MP = ' + (MP_TOKEN ? 'cargado' : '*** FALTA MP_ACCESS_TOKEN ***') + '\n' +
     'firma MP = ' + (!MP_SECRET ? 'sin secreto' : (MP_ENFORCE ? 'ENFORCE (bloquea)' : 'modo prueba (solo loguea)')) + '\n' +
-    'memoria persistente = ' + (persistenciaOk ? 'SI (volumen /data)' : 'NO -> se pierde todo al reiniciar') + '\n' +
+    'memoria persistente = ' + (persistenciaOk ? 'SI (volumen /data)' : 'NO -> ' + motivoSinPersistencia) + '\n' +
     'avisos al celular = ' + (NTFY_TOPIC ? 'activados' : '*** FALTA NTFY_TOPIC ***') + '\n' +
     'arranque server = ' + new Date(arranque).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) + '\n' +
     'hora servidor = ' + hora()
@@ -789,31 +802,85 @@ function marcarConversion() {
   }
 }
 
-function paginaCupon(titulo, cuerpo, color, boton) {
+// Las paginas que ve el cliente cuando escanea. Siguen la estetica del cupon
+// impreso: gris carbon, el amarillo del circulo B, el rojo del puno, las barras
+// diagonales y la tipografia condensada en italica con contorno.
+function paginaCupon(opciones) {
+  const o = opciones || {};
+  const acento = o.acento || '#F5B301';
   return '<!DOCTYPE html><html lang="es"><head>' +
-    '<meta charset="utf-8">' +
-    '<meta name="viewport" content="width=device-width,initial-scale=1">' +
-    '<title>BeerPunch</title>' +
-    '<link rel="preconnect" href="https://fonts.googleapis.com">' +
-    '<link href="https://fonts.googleapis.com/css2?family=Anton&display=swap" rel="stylesheet">' +
-    '<style>' +
-    'body{margin:0;min-height:100vh;background:#1A0E0E;color:#EDE4D8;' +
-    'font-family:-apple-system,system-ui,sans-serif;display:flex;flex-direction:column;' +
-    'align-items:center;justify-content:center;padding:28px;text-align:center}' +
-    '.marca{font-family:Anton,Impact,sans-serif;font-size:24px;letter-spacing:.08em;' +
-    'text-transform:uppercase;color:#7A2E2E;margin-bottom:26px}' +
-    'h1{font-family:Anton,Impact,sans-serif;font-size:44px;line-height:1.05;margin:0 0 16px;' +
-    'text-transform:uppercase;color:' + color + '}' +
-    'p{font-size:17px;line-height:1.6;margin:0 0 12px;max-width:340px}' +
-    '.chico{font-size:14px;color:#9A8378;margin-top:22px;max-width:320px}' +
-    'button{font-family:Anton,Impact,sans-serif;font-size:24px;letter-spacing:.06em;' +
-    'text-transform:uppercase;background:#FFB020;color:#1A0E0E;border:0;border-radius:14px;' +
-    'padding:22px 44px;margin-top:26px;width:100%;max-width:340px;cursor:pointer}' +
-    'button:disabled{opacity:.5}' +
-    '</style></head><body>' +
-    '<div class="marca">BeerPunch · Beerlin</div>' +
-    '<h1>' + titulo + '</h1>' + cuerpo + (boton || '') +
-    '</body></html>';
+'<meta charset="utf-8">' +
+'<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">' +
+'<meta name="theme-color" content="#24242B">' +
+'<title>BeerPunch</title>' +
+'<link rel="preconnect" href="https://fonts.googleapis.com">' +
+'<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
+'<link href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">' +
+'<style>' +
+':root{--carbon:#24242B;--carbon2:#1C1C22;--amarillo:#F5B301;--rojo:#E23B36;--azul:#2B4FD8;--blanco:#F2F0EC;--gris:#8A8894}' +
+'*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}' +
+'html,body{height:100%}' +
+'body{margin:0;background:var(--carbon);color:var(--blanco);' +
+'font-family:"Barlow Condensed",-apple-system,system-ui,sans-serif;' +
+'display:flex;align-items:center;justify-content:center;padding:32px 22px;' +
+'position:relative;overflow-x:hidden}' +
+// barras diagonales, como las del cupon impreso
+'body::before,body::after{content:"";position:fixed;width:230px;height:13px;' +
+'transform:rotate(-45deg);pointer-events:none;z-index:0}' +
+'body::before{background:var(--azul);top:52px;left:-118px}' +
+'body::after{background:var(--rojo);bottom:74px;right:-118px}' +
+'.barra2{position:fixed;width:150px;height:9px;background:var(--rojo);' +
+'transform:rotate(-45deg);top:128px;left:-96px;pointer-events:none;z-index:0}' +
+'.barra3{position:fixed;width:150px;height:9px;background:var(--azul);' +
+'transform:rotate(-45deg);bottom:150px;right:-96px;pointer-events:none;z-index:0}' +
+'.caja{position:relative;z-index:1;width:100%;max-width:400px;text-align:center}' +
+// lockup de marca
+'.logos{display:flex;align-items:center;justify-content:center;gap:9px;margin-bottom:26px}' +
+'.bola{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;' +
+'justify-content:center;font-family:Anton,Impact,sans-serif;font-size:21px;line-height:1}' +
+'.bola.b{background:var(--amarillo);color:#1A1A1F}' +
+'.bola.p{background:var(--rojo);color:#fff;font-size:19px}' +
+'.equis{color:var(--gris);font-size:15px;font-weight:700}' +
+'.sello{font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:13px;' +
+'letter-spacing:.22em;color:var(--gris);text-transform:uppercase;margin-bottom:18px}' +
+// titular al estilo del cupon
+'h1{font-family:Anton,Impact,sans-serif;font-size:clamp(38px,13vw,58px);line-height:.92;' +
+'margin:0 0 14px;text-transform:uppercase;transform:skewX(-7deg);' +
+'color:var(--blanco);letter-spacing:.005em;' +
+'text-shadow:3px 3px 0 rgba(0,0,0,.45)}' +
+'h1 em{font-style:normal;color:' + acento + '}' +
+// bloque rojo tipo "TIRO GRATIS"
+'.bloque{display:inline-block;background:' + acento + ';color:#1A1A1F;' +
+'font-family:Anton,Impact,sans-serif;font-size:clamp(22px,7.5vw,31px);' +
+'text-transform:uppercase;padding:9px 20px 7px;transform:skewX(-7deg);' +
+'margin:2px 0 20px;line-height:1.05}' +
+'.bloque span{display:block;transform:skewX(7deg)}' +
+'p{font-size:19px;line-height:1.45;margin:0 0 10px;color:var(--blanco);font-weight:600}' +
+'.chico{font-size:14px;line-height:1.5;color:var(--gris);margin-top:20px;font-weight:600}' +
+// boton
+'button{width:100%;font-family:Anton,Impact,sans-serif;' +
+'font-size:clamp(23px,6.6vw,29px);letter-spacing:.02em;text-transform:uppercase;' +
+'background:var(--amarillo);color:#1A1A1F;border:0;border-radius:6px;' +
+'padding:23px 20px 20px;margin-top:26px;cursor:pointer;transform:skewX(-7deg);' +
+'box-shadow:5px 5px 0 rgba(0,0,0,.45);transition:transform .1s,box-shadow .1s}' +
+'button span{display:block;transform:skewX(7deg)}' +
+'button:active{transform:skewX(-7deg) translate(3px,3px);box-shadow:2px 2px 0 rgba(0,0,0,.45)}' +
+'button:disabled{opacity:.55;box-shadow:none}' +
+'.marco{border:2px solid var(--amarillo);border-radius:5px;padding:13px 15px;' +
+'margin-top:26px;font-size:15px;line-height:1.5;color:var(--blanco);font-weight:600}' +
+'.marco b{color:var(--amarillo)}' +
+'@media(prefers-reduced-motion:reduce){button{transition:none}}' +
+'</style></head><body>' +
+'<div class="barra2"></div><div class="barra3"></div>' +
+'<div class="caja">' +
+'<div class="logos"><div class="bola b">B</div><div class="equis">&#10005;</div>' +
+'<div class="bola p">&#128074;</div></div>' +
+'<div class="sello">BeerPunch &middot; Beerlin</div>' +
+'<h1>' + (o.titulo || '') + '</h1>' +
+(o.bloque ? '<div class="bloque"><span>' + o.bloque + '</span></div>' : '') +
+(o.cuerpo || '') +
+(o.boton || '') +
+'</div></body></html>';
 }
 
 // Paso 1: el cliente escanea. Esto NO gasta el cupon.
@@ -824,39 +891,39 @@ function paginaEscaneo(req, res) {
   const cup = cupones[cod];
 
   if (!cup) {
-    return res.type('text/html').send(paginaCupon(
-      'Cupón no válido',
-      '<p>Este código no existe. Puede estar mal escaneado.</p>' +
-      '<p class="chico">Pedile otro cupón al mozo.</p>',
-      '#D8443C'));
+    return res.type('text/html').send(paginaCupon({
+      titulo: 'Este cupón<br><em>no anda</em>',
+      cuerpo: '<p>El código no figura en el sistema.</p>' +
+        '<p class="chico">Puede haber quedado mal escaneado.<br>Pedile otro al mozo.</p>',
+      acento: '#E23B36' }));
   }
 
   if (cup.usado) {
     const cuando = new Date(cup.usado).toLocaleString('es-AR', {
       timeZone: 'America/Argentina/Buenos_Aires', hour12: false,
       day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-    return res.type('text/html').send(paginaCupon(
-      'Cupón ya usado',
-      '<p>Este cupón se activó el ' + cuando + '.</p>' +
-      '<p class="chico">Cada cupón sirve una sola vez.</p>',
-      '#D8443C'));
+    return res.type('text/html').send(paginaCupon({
+      titulo: 'Este ya<br><em>se usó</em>',
+      cuerpo: '<p>Se activó el ' + cuando + '.</p>' +
+        '<p class="chico">Cada cupón sirve una sola vez.<br>Pedile otro al mozo y probá de nuevo.</p>',
+      acento: '#E23B36' }));
   }
 
   if (!enHorarioDeBar()) {
-    return res.type('text/html').send(paginaCupon(
-      'Fuera de horario',
-      '<p>Los cupones se activan mientras el bar está abierto.</p>' +
-      '<p class="chico">Guardá el cupón: sigue estando disponible.</p>',
-      '#E08A2B'));
+    return res.type('text/html').send(paginaCupon({
+      titulo: 'Ahora<br><em>no</em>',
+      cuerpo: '<p>Los tiros se activan con el bar abierto.</p>' +
+        '<div class="marco"><b>Tu cupón sigue intacto.</b><br>Volvé cuando abramos y usalo.</div>',
+      acento: '#F5B301' }));
   }
 
   if (!shellyVivo() || bloqueado) {
-    return res.type('text/html').send(paginaCupon(
-      'La máquina no está disponible',
-      '<p>Ahora mismo la máquina no puede entregar tiros.</p>' +
-      '<p><b>No gastamos tu cupón.</b> Guardalo y probá en un rato.</p>' +
-      '<p class="chico">Avisale al mozo así lo revisan.</p>',
-      '#E08A2B'));
+    return res.type('text/html').send(paginaCupon({
+      titulo: 'Esperá<br><em>un toque</em>',
+      cuerpo: '<p>La máquina no está entregando tiros en este momento.</p>' +
+        '<div class="marco"><b>No te gastamos el cupón.</b><br>Guardalo y probá en un rato.</div>' +
+        '<p class="chico">Avisale al mozo así la revisan.</p>',
+      acento: '#F5B301' }));
   }
 
   // El boton vuelve por el mismo camino por el que entro el cliente.
@@ -865,22 +932,24 @@ function paginaEscaneo(req, res) {
   // El boton manda un POST por JavaScript. Los bots que hacen preview de los
   // links no ejecutan JavaScript, asi que no pueden quemar el cupon.
   const boton =
-    '<button id="b" onclick="activar()">Activar mi tiro</button>' +
-    '<p class="chico">Tocá el botón solo cuando estés parado en la máquina.<br>' +
-    'El tiro sale enseguida y no se puede guardar para después.</p>' +
+    '<button id="b" onclick="activar()"><span>Activar mi tiro</span></button>' +
+    '<p class="chico">Tocalo solo cuando estés parado en la máquina.<br>' +
+    'El tiro sale enseguida y no se guarda para después.</p>' +
     '<script>' +
     'function activar(){' +
-    'var b=document.getElementById("b");b.disabled=true;b.textContent="Activando...";' +
+    'var b=document.getElementById("b");b.disabled=true;b.innerHTML="<span>Activando...</span>";' +
     'fetch("' + rutaBase + '/' + cod + '/activar",{method:"POST"})' +
     '.then(function(r){return r.text()})' +
     '.then(function(t){document.open();document.write(t);document.close();})' +
-    '.catch(function(){b.disabled=false;b.textContent="Reintentar";});' +
+    '.catch(function(){b.disabled=false;b.innerHTML="<span>Reintentar</span>";});' +
     '}</script>';
 
-  res.type('text/html').send(paginaCupon(
-    '1 tiro gratis',
-    '<p>Tenés un tiro de regalo en la máquina de boxeo.</p>',
-    '#FFB020', boton));
+  res.type('text/html').send(paginaCupon({
+    titulo: '¿Te<br>animás?',
+    bloque: '1 tiro gratis',
+    cuerpo: '<p>Pegale a la máquina y mirá cuánto marcás.</p>',
+    boton: boton,
+    acento: '#E23B36' }));
 }
 
 const RUTAS_CUPON = ['/c/:codigo', '/a/:codigo', '/cupon/:codigo', '/activar/:codigo'];
@@ -892,23 +961,31 @@ function activarCupon(req, res) {
   const cup = cupones[cod];
 
   if (!cup) {
-    return res.type('text/html').send(paginaCupon('Cupón no válido',
-      '<p>Este código no existe.</p>', '#D8443C'));
+    return res.type('text/html').send(paginaCupon({
+      titulo: 'Este cupón<br><em>no anda</em>',
+      cuerpo: '<p class="chico">El código no figura en el sistema.</p>',
+      acento: '#E23B36' }));
   }
 
   if (cup.usado) {
-    return res.type('text/html').send(paginaCupon('Cupón ya usado',
-      '<p>Este cupón se activó hace un rato.</p>', '#D8443C'));
+    return res.type('text/html').send(paginaCupon({
+      titulo: 'Este ya<br><em>se usó</em>',
+      cuerpo: '<p class="chico">Cada cupón sirve una sola vez.</p>',
+      acento: '#E23B36' }));
   }
 
   if (!enHorarioDeBar()) {
-    return res.type('text/html').send(paginaCupon('Fuera de horario',
-      '<p>Guardá el cupón, no se gastó.</p>', '#E08A2B'));
+    return res.type('text/html').send(paginaCupon({
+      titulo: 'Ahora<br><em>no</em>',
+      cuerpo: '<div class="marco"><b>Tu cupón sigue intacto.</b><br>Volvé con el bar abierto.</div>',
+      acento: '#F5B301' }));
   }
 
   if (!shellyVivo() || bloqueado) {
-    return res.type('text/html').send(paginaCupon('La máquina no está disponible',
-      '<p><b>No gastamos tu cupón.</b> Guardalo y probá en un rato.</p>', '#E08A2B'));
+    return res.type('text/html').send(paginaCupon({
+      titulo: 'Esperá<br><em>un toque</em>',
+      cuerpo: '<div class="marco"><b>No te gastamos el cupón.</b><br>Guardalo y probá en un rato.</div>',
+      acento: '#F5B301' }));
   }
 
   // Se marca usado ANTES de intentar entregar. Si dos personas tocan el boton
@@ -924,9 +1001,11 @@ function activarCupon(req, res) {
     cup.usado = null;
     guardarCupones();
     log('CUPON DEVUELTO', cod + ' no se pudo entregar, vuelve a estar disponible');
-    return res.type('text/html').send(paginaCupon('No se pudo activar',
-      '<p><b>Tu cupón sigue sirviendo.</b> Probá de nuevo en un minuto.</p>' +
-      '<p class="chico">Si sigue igual, avisale al mozo.</p>', '#E08A2B'));
+    return res.type('text/html').send(paginaCupon({
+      titulo: 'Se nos<br><em>trabó</em>',
+      cuerpo: '<div class="marco"><b>Tu cupón sigue sirviendo.</b><br>Probá de nuevo en un minuto.</div>' +
+        '<p class="chico">Si sigue igual, avisale al mozo.</p>',
+      acento: '#F5B301' }));
   }
 
   canjes.push({ ts: Date.now(), codigo: cod, lote: cup.lote, convertido: false });
@@ -935,10 +1014,12 @@ function activarCupon(req, res) {
   guardarCupones();
   log('CUPON', cod + ' (lote ' + cup.lote + ') canjeado');
 
-  res.type('text/html').send(paginaCupon('¡Listo!',
-    '<p>Tu tiro ya está cargado en la máquina.</p>' +
-    '<p class="chico">Si no lo ves en unos segundos, avisale al mozo.</p>',
-    '#4E9B5F'));
+  res.type('text/html').send(paginaCupon({
+    titulo: '¡Dale<br>que va!',
+    bloque: 'tiro cargado',
+    cuerpo: '<p>Ya está en la máquina.<br>Pegale con todo.</p>' +
+      '<p class="chico">Si no sale en unos segundos, avisale al mozo.</p>',
+    acento: '#F5B301' }));
 }
 
 RUTAS_CUPON.forEach(function (r) { app.post(r + '/activar', activarCupon); });
@@ -1392,6 +1473,12 @@ app.get('/admin', function (req, res) {
 '</div>' +
 
 '<div class="tira ' + estadoColor + '"><i></i>' + estadoTexto + '</div>' +
+(persistenciaOk ? '' :
+  '<div style="background:#4A1717;border-bottom:1px solid #6E2222;padding:14px 18px;font-size:14px;line-height:1.6;color:#FFC9C4">' +
+  '<b>Falta el volumen en Railway.</b><br>' +
+  'Los cupones, el historial y la caja se borran cada vez que el servidor se reinicia.<br>' +
+  'Railway → proyecto → + New → Volume → montarlo en <b>/data</b>' +
+  '</div>') +
 
 '<div class="tablero">' +
 '<div class="rot">Caja de la jornada</div>' +
@@ -1466,7 +1553,7 @@ app.get('/admin', function (req, res) {
 'Sin confirmar · <b>' + (entregaEnVuelo ? entregaEnVuelo.n : 0) + '</b><br>' +
 'QR de Mercado Pago · <b>' + (qrCortado ? 'cortado' : 'activo') + '</b><br>' +
 'Avisos al celular · <b>' + (NTFY_TOPIC ? 'sí' : 'NO CONFIGURADOS') + '</b><br>' +
-'Memoria del log · <b>' + (persistenciaOk ? 'guardada' : 'SE PIERDE AL REINICIAR') + '</b><br>' +
+'Memoria del log · <b>' + (persistenciaOk ? 'guardada en el volumen' : 'NO SE GUARDA') + '</b><br>' +
 'Servidor desde · <b>' + new Date(arranque).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) + '</b>' +
 '</div></div>' +
 
@@ -1652,6 +1739,7 @@ app.listen(process.env.PORT || 3000, '0.0.0.0', async function () {
       ' | avisos=' + (NTFY_TOPIC ? 'SI' : 'NO'));
   if (!MP_TOKEN) log('ALERTA', 'FALTA MP_ACCESS_TOKEN');
   if (!BASE_URL) log('ALERTA', 'FALTA RAILWAY_PUBLIC_DOMAIN');
+  if (!persistenciaOk) log('ALERTA', 'SIN VOLUMEN: ' + motivoSinPersistencia + '. Los cupones y la caja se pierden en cada reinicio.');
   await descubrirCajas();
   await crearTodasLasOrdenes();
 });
