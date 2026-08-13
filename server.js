@@ -946,33 +946,156 @@ RUTAS_CUPON.forEach(function (r) { app.post(r + '/activar', activarCupon); });
 // ===== ADMINISTRACION DE CUPONES =====
 
 app.get('/cupones', function (req, res) {
-  const s = statsCupones(req.query.lote);
+  const s = statsCupones();
+  const c = CLAVE ? encodeURIComponent(CLAVE) : '';
+
   const lotes = {};
-  Object.keys(cupones).forEach(function (c) {
-    const l = cupones[c].lote;
-    if (!lotes[l]) lotes[l] = { total: 0, usados: 0 };
-    lotes[l].total++;
-    if (cupones[c].usado) lotes[l].usados++;
+  Object.keys(cupones).sort().forEach(function (cod) {
+    const l = cupones[cod].lote;
+    if (!lotes[l]) lotes[l] = [];
+    lotes[l].push(cod);
   });
 
-  let txt = 'CUPONES\n=======================\n\n';
-  txt += 'Impresos        ' + s.total + '\n';
-  txt += 'Usados          ' + s.usados + '\n';
-  txt += 'Sin usar        ' + s.disponibles + '\n\n';
-  txt += 'Canjes hoy      ' + s.canjesHoy + '\n';
-  txt += 'Canjes total    ' + s.canjesTotal + '\n\n';
-  txt += 'CONVIRTIERON EN COMPRA\n';
-  txt += '  ' + s.convertidos + ' de ' + s.canjesTotal + '  (' + s.conversion + '%)\n';
-  txt += '  = cuantos compraron un tiro dentro de los 15 min\n';
-  txt += '    despues de usar el cupon\n\n';
-  txt += 'POR LOTE\n';
+  let bloquesLote = '';
   Object.keys(lotes).sort().forEach(function (l) {
-    txt += '  ' + l + ': ' + lotes[l].usados + '/' + lotes[l].total + ' usados\n';
+    const codigos = lotes[l];
+    const usados = codigos.filter(function (x) { return cupones[x].usado; }).length;
+    const pct = Math.round(usados * 100 / codigos.length);
+    let chips = '';
+    codigos.forEach(function (cod) {
+      const usado = !!cupones[cod].usado;
+      chips += '<span class="chip' + (usado ? ' gastado' : '') + '">' + cod + '</span>';
+    });
+    bloquesLote +=
+      '<div class="lote">' +
+      '<div class="lote-tope"><b>Lote ' + l + '</b>' +
+      '<span>' + usados + ' de ' + codigos.length + ' usados</span></div>' +
+      '<div class="barra"><i style="width:' + pct + '%"></i></div>' +
+      '<div class="chips">' + chips + '</div>' +
+      '<a class="b chico" href="/cupones/lista?lote=' + l + '">Links para imprimir</a>' +
+      '</div>';
   });
-  if (Object.keys(lotes).length === 0) txt += '  todavia no hay cupones cargados\n';
-  txt += '\nPara crear un lote nuevo:\n';
-  txt += '  /cupones/generar?lote=L3&cantidad=72&clave=' + (CLAVE || '') + '\n';
-  res.type('text/plain').send(txt);
+
+  if (bloquesLote === '') {
+    bloquesLote = '<div class="vacio">Todavía no hay cupones cargados.<br>' +
+      'Si ya los mandaste a imprimir, pegá los códigos acá abajo.<br>' +
+      'Si todavía no, creá un lote nuevo y después mandalo a imprimir.</div>';
+  }
+
+  const html = '<!DOCTYPE html><html lang="es"><head>' +
+'<meta charset="utf-8">' +
+'<meta name="viewport" content="width=device-width,initial-scale=1">' +
+'<title>Cupones BPK</title>' +
+'<link rel="preconnect" href="https://fonts.googleapis.com">' +
+'<link href="https://fonts.googleapis.com/css2?family=Anton&family=Share+Tech+Mono&display=swap" rel="stylesheet">' +
+'<style>' +
+':root{--fondo:#1A0E0E;--sup:#241414;--borde:#3A2020;--cuero:#7A2E2E;--hueso:#EDE4D8;--tenue:#9A8378;--led:#FFB020;--ok:#4E9B5F}' +
+'*{box-sizing:border-box}' +
+'body{margin:0;background:var(--fondo);color:var(--hueso);font-family:-apple-system,system-ui,sans-serif;padding:0 0 40px}' +
+'.tope{padding:20px 18px 14px;border-bottom:1px solid var(--borde);display:flex;align-items:center;gap:12px}' +
+'.tope a{color:var(--tenue);text-decoration:none;font-size:24px;line-height:1}' +
+'.marca{font-family:Anton,Impact,sans-serif;font-size:26px;letter-spacing:.06em;text-transform:uppercase;margin:0}' +
+'.tablero{padding:24px 18px;text-align:center;border-bottom:1px solid var(--borde)}' +
+'.cifra{font-family:"Share Tech Mono",monospace;font-size:54px;line-height:1;color:var(--led);text-shadow:0 0 20px rgba(255,176,32,.3)}' +
+'.rot{font-family:"Share Tech Mono",monospace;font-size:11px;letter-spacing:.22em;color:var(--tenue);text-transform:uppercase;margin-top:6px}' +
+'.trio{display:flex;justify-content:center;gap:26px;margin-top:18px}' +
+'.trio div{text-align:center}' +
+'.trio b{display:block;font-family:"Share Tech Mono",monospace;font-size:20px}' +
+'.trio span{font-size:10px;letter-spacing:.14em;color:var(--tenue);text-transform:uppercase}' +
+'.seccion{padding:22px 18px;border-bottom:1px solid var(--borde)}' +
+'.titulo{font-family:Anton,Impact,sans-serif;font-size:15px;letter-spacing:.1em;text-transform:uppercase;color:var(--tenue);margin:0 0 6px}' +
+'.ayuda{font-size:13px;line-height:1.6;color:var(--tenue);margin:0 0 14px}' +
+'.lote{background:var(--sup);border:1px solid var(--borde);border-radius:12px;padding:14px;margin-bottom:12px}' +
+'.lote-tope{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px}' +
+'.lote-tope b{font-family:Anton,Impact,sans-serif;font-size:17px;letter-spacing:.04em}' +
+'.lote-tope span{font-family:"Share Tech Mono",monospace;font-size:12px;color:var(--tenue)}' +
+'.barra{height:6px;background:#2E1A1A;border-radius:3px;overflow:hidden;margin-bottom:12px}' +
+'.barra i{display:block;height:100%;background:var(--cuero)}' +
+'.chips{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px}' +
+'.chip{font-family:"Share Tech Mono",monospace;font-size:11px;padding:4px 7px;border-radius:5px;background:#17331F;color:#9FD9B0;border:1px solid #24512F}' +
+'.chip.gastado{background:#2A1A1A;color:#6B564E;border-color:#3A2020;text-decoration:line-through}' +
+'.vacio{background:var(--sup);border:1px dashed var(--borde);border-radius:12px;padding:20px;text-align:center;font-size:14px;line-height:1.7;color:var(--tenue)}' +
+'label{display:block;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--tenue);margin:0 0 6px}' +
+'input,textarea{width:100%;background:#140B0B;color:var(--hueso);border:1px solid var(--borde);border-radius:9px;padding:13px;font-size:16px;font-family:"Share Tech Mono",monospace;margin-bottom:12px}' +
+'textarea{height:130px;resize:vertical;line-height:1.5}' +
+'.fila2{display:flex;gap:10px}.fila2>div{flex:1}' +
+'button,.b{display:block;width:100%;text-align:center;text-decoration:none;padding:14px;border-radius:10px;font-size:15px;font-weight:600;background:var(--sup);color:var(--hueso);border:1px solid var(--borde);cursor:pointer;font-family:inherit}' +
+'button.principal{background:#3E1E1E;border-color:var(--cuero);color:#FFD9CF}' +
+'.b.chico{padding:9px;font-size:13px}' +
+'button:disabled{opacity:.5}' +
+'.aviso{margin-top:12px;padding:13px;border-radius:9px;font-size:14px;line-height:1.6;display:none;white-space:pre-wrap}' +
+'.aviso.ok{display:block;background:#173A21;border:1px solid #22562F;color:#C3EBCE}' +
+'.aviso.mal{display:block;background:#4A1717;border:1px solid #6E2222;color:#FFC9C4}' +
+'</style></head><body>' +
+
+'<div class="tope"><a href="/admin">&#8592;</a><h1 class="marca">Cupones</h1></div>' +
+
+'<div class="tablero">' +
+'<div class="cifra">' + s.disponibles + '</div>' +
+'<div class="rot">sin usar</div>' +
+'<div class="trio">' +
+'<div><b>' + s.canjesHoy + '</b><span>hoy</span></div>' +
+'<div><b>' + s.usados + '</b><span>usados</span></div>' +
+'<div><b>' + s.conversion + '%</b><span>compró después</span></div>' +
+'</div></div>' +
+
+'<div class="seccion">' +
+'<h2 class="titulo">Lotes</h2>' + bloquesLote + '</div>' +
+
+'<div class="seccion">' +
+'<h2 class="titulo">Cargar cupones ya impresos</h2>' +
+'<p class="ayuda">Si mandaste a imprimir los cupones antes de cargarlos acá, el servidor no los conoce ' +
+'y va a decir "cupón no válido". Pegá los códigos para que los reconozca. ' +
+'Separados por coma, espacio o uno por línea.</p>' +
+'<label>Nombre del lote</label>' +
+'<input id="loteImp" value="L2" autocapitalize="characters">' +
+'<label>Códigos</label>' +
+'<textarea id="codigos" placeholder="G5D5B, HSV97, DUV0F..." autocapitalize="characters"></textarea>' +
+'<button class="principal" onclick="importar()">Cargar estos códigos</button>' +
+'<div class="aviso" id="avImp"></div></div>' +
+
+'<div class="seccion">' +
+'<h2 class="titulo">Crear un lote nuevo</h2>' +
+'<p class="ayuda">Genera códigos nuevos acá y después los mandás a imprimir. ' +
+'Es el camino más seguro: nacen conocidos por el servidor.</p>' +
+'<div class="fila2">' +
+'<div><label>Lote</label><input id="loteGen" placeholder="L3" autocapitalize="characters"></div>' +
+'<div><label>Cantidad</label><input id="cant" type="number" inputmode="numeric" placeholder="72"></div>' +
+'</div>' +
+'<button onclick="generar()">Crear lote</button>' +
+'<div class="aviso" id="avGen"></div></div>' +
+
+'<script>' +
+'var CLAVE="' + c + '";' +
+'function mostrar(id,texto,ok){var e=document.getElementById(id);e.textContent=texto;e.className="aviso "+(ok?"ok":"mal");}' +
+'function importar(){' +
+'var lote=document.getElementById("loteImp").value.trim();' +
+'var cods=document.getElementById("codigos").value.trim();' +
+'if(!lote){mostrar("avImp","Poné un nombre de lote.",false);return;}' +
+'if(!cods){mostrar("avImp","Pegá los códigos primero.",false);return;}' +
+'var b=event.target;b.disabled=true;b.textContent="Cargando...";' +
+'fetch("/cupones/importar?lote="+encodeURIComponent(lote)+"&clave="+CLAVE+"&codigos="+encodeURIComponent(cods))' +
+'.then(function(r){return r.text()}).then(function(t){' +
+'mostrar("avImp",t,t.indexOf("Cargados")>=0);' +
+'b.disabled=false;b.textContent="Cargar estos códigos";' +
+'if(t.indexOf("Cargados")>=0){setTimeout(function(){location.reload()},1800);}' +
+'}).catch(function(){mostrar("avImp","No se pudo conectar. Probá de nuevo.",false);' +
+'b.disabled=false;b.textContent="Cargar estos códigos";});}' +
+'function generar(){' +
+'var lote=document.getElementById("loteGen").value.trim();' +
+'var cant=document.getElementById("cant").value.trim();' +
+'if(!lote||!cant){mostrar("avGen","Completá el lote y la cantidad.",false);return;}' +
+'var b=event.target;b.disabled=true;b.textContent="Creando...";' +
+'fetch("/cupones/generar?lote="+encodeURIComponent(lote)+"&cantidad="+encodeURIComponent(cant)+"&clave="+CLAVE)' +
+'.then(function(r){return r.text()}).then(function(t){' +
+'mostrar("avGen",t,t.indexOf("creados")>=0);' +
+'b.disabled=false;b.textContent="Crear lote";' +
+'if(t.indexOf("creados")>=0){setTimeout(function(){location.reload()},1800);}' +
+'}).catch(function(){mostrar("avGen","No se pudo conectar.",false);' +
+'b.disabled=false;b.textContent="Crear lote";});}' +
+'</script></body></html>';
+
+  res.type('text/html').send(html);
 });
 
 // Importar cupones que YA fueron impresos con otro sistema. Los codigos
@@ -1305,17 +1428,16 @@ app.get('/admin', function (req, res) {
 (function () {
   const s = statsCupones();
   if (s.total === 0) {
-    return '<div class="datos">Todavía no hay cupones cargados.<br>' +
-      'Se crean desde <b>/cupones/generar</b></div>';
+    return '<div class="datos">Todavía no hay cupones cargados.</div>' +
+      '<div class="botones" style="margin-top:12px">' +
+      '<a class="b ancho" href="/cupones">Cargar o crear cupones</a></div>';
   }
   return '<div class="reparto"><span>Sin usar</span><b>' + s.disponibles + ' de ' + s.total + '</b></div>' +
     '<div class="reparto"><span>Canjeados hoy</span><b>' + s.canjesHoy + '</b></div>' +
-    '<div class="reparto"><span>Terminaron comprando</span><b>' + s.convertidos + ' (' + s.conversion + '%)</b></div>';
-})() +
-'<div class="botones" style="margin-top:12px">' +
-'<a class="b" href="/cupones">Ver detalle</a>' +
-'<a class="b" href="/cupones/lista">Links para imprimir</a>' +
-'</div></div>' +
+    '<div class="reparto"><span>Compró después de canjear</span><b>' + s.convertidos + ' de ' + s.canjesTotal + ' (' + s.conversion + '%)</b></div>' +
+    '<div class="botones" style="margin-top:12px">' +
+    '<a class="b ancho" href="/cupones">Administrar cupones</a></div>';
+})() + '</div>' +
 
 '<div class="seccion">' +
 '<h2 class="titulo">Prendida y apagada</h2>' +
