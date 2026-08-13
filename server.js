@@ -13,7 +13,7 @@ app.use(express.urlencoded({ extended: true }));
 // ============================================================
 //  BPK / BeerPunch - servidor de creditos
 //  v6: corta el QR si el Shelly esta caido, panel para el bar,
-//      caja del dia, ventas en efectivo, log limpio.
+//      caja del dia, log limpio, cobro solo por QR y billetero.
 // ============================================================
 
 const MP_TOKEN = process.env.MP_ACCESS_TOKEN || '';
@@ -57,6 +57,7 @@ const PORCENTAJE_BAR = 20;  // lo que le toca a Andres sobre el neto
 const NTFY_TOPIC = process.env.NTFY_TOPIC || '';
 let alertaShellyActiva = false;
 let qrCortado = false;
+let mpFallando = false;
 
 // ===== ALMACENAMIENTO PERSISTENTE =====
 const DATA_DIR = '/data';
@@ -203,8 +204,6 @@ function resumenJornada() {
   const delDia = ventas.filter(function (v) { return v.ts >= desde; });
   const total = delDia.reduce(function (a, v) { return a + v.monto; }, 0);
   const fichas = delDia.reduce(function (a, v) { return a + v.fichas; }, 0);
-  const efectivo = delDia.filter(function (v) { return v.tipo === 'efectivo'; });
-  const qr = delDia.filter(function (v) { return v.tipo === 'qr'; });
 
   const porCombo = {};
   delDia.forEach(function (v) {
@@ -219,14 +218,29 @@ function resumenJornada() {
     operaciones: delDia.length,
     total: total,
     fichas: fichas,
-    totalQR: qr.reduce(function (a, v) { return a + v.monto; }, 0),
-    cantidadQR: qr.length,
-    totalEfectivo: efectivo.reduce(function (a, v) { return a + v.monto; }, 0),
-    cantidadEfectivo: efectivo.length,
     porCombo: porCombo,
     paraBar: Math.round(total * PORCENTAJE_BAR / 100),
     ventas: delDia
   };
+}
+
+// Devuelve las ultimas n jornadas (la de hoy incluida) para ver la racha.
+function jornadasPrevias(n) {
+  const inicioHoy = inicioJornada();
+  const dia = 24 * 60 * 60 * 1000;
+  const salida = [];
+  for (let i = 0; i < n; i++) {
+    const desde = inicioHoy - i * dia;
+    const hasta = desde + dia;
+    const v = ventas.filter(function (x) { return x.ts >= desde && x.ts < hasta; });
+    salida.push({
+      desde: desde,
+      total: v.reduce(function (a, x) { return a + x.monto; }, 0),
+      fichas: v.reduce(function (a, x) { return a + x.fichas; }, 0),
+      ops: v.length
+    });
+  }
+  return salida;
 }
 
 // ===== ALTA DE FICHAS CON CORTE AUTOMATICO =====
@@ -371,8 +385,29 @@ async function borrarOrden(caja) {
 
 async function crearTodasLasOrdenes() {
   if (cajas.length === 0) await descubrirCajas();
-  for (let i = 0; i < cajas.length; i++) await crearOrden(cajas[i]);
-  rutina('ORDENES', 'activas en ' + cajas.length + ' cajas');
+  let ok = 0;
+  for (let i = 0; i < cajas.length; i++) {
+    if (await crearOrden(cajas[i])) ok++;
+  }
+  rutina('ORDENES', 'activas en ' + ok + '/' + cajas.length + ' cajas');
+
+  // Si el Shelly anda pero MP no deja crear ordenes, el QR no sirve aunque
+  // la maquina este perfecta: el QR no sirve aunque todo lo demas ande.
+  const fallaAhora = (cajas.length === 0 || ok === 0);
+  if (fallaAhora && !mpFallando) {
+    mpFallando = true;
+    log('MP CAIDO', 'no se pudo crear ninguna orden -> el QR no va a funcionar');
+    if (shellyVivo()) {
+      avisar('BPK - Mercado Pago no responde',
+        'La maquina funciona bien pero el QR no se puede generar.\n' +
+        'Que cobren por el billetero mientras tanto.\n' +
+        'El combo de 3 tiros no se puede vender hasta que vuelva.', enHorarioDeBar());
+    }
+  }
+  if (!fallaAhora && mpFallando) {
+    mpFallando = false;
+    log('MP OK', 'las ordenes se crean de nuevo');
+  }
 }
 
 async function borrarTodasLasOrdenes() {
@@ -467,7 +502,7 @@ app.get('/estado', function (req, res) {
     'pendingActivation = ' + pendingActivation + '\n' +
     'en vuelo (sin confirmar) = ' + (entregaEnVuelo ? entregaEnVuelo.n + ' fichas, hace ' + Math.round((Date.now() - entregaEnVuelo.ts) / 1000) + ' s' : 'ninguna') + '\n' +
     'bloqueado = ' + (bloqueado ? 'SI -> ' + motivoBloqueo : 'no') + '\n' +
-    'QR de Mercado Pago = ' + (qrCortado ? 'CORTADO (Shelly caido)' : 'activo') + '\n' +
+    'QR de Mercado Pago = ' + (qrCortado ? 'CORTADO (Shelly caido)' : (mpFallando ? 'FALLANDO (MP no crea ordenes)' : 'activo')) + '\n' +
     'fichas ultimos ' + VENTANA_MIN + ' min = ' + ultimas + ' (tope ' + MAX_FICHAS_VENTANA + ')\n' +
     'ultimo poll del Shelly = ' + (segDesdePoll < 0 ? 'nunca' : 'hace ' + segDesdePoll + ' s') + '\n' +
     'ultimo arranque del Shelly = ' + (ultimoArranqueShelly ? new Date(ultimoArranqueShelly).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) : 'sin avisos desde que arranco el server') + '\n' +
@@ -550,25 +585,6 @@ app.get('/gratis', function (req, res) {
   res.send(ok ? 'Activado (1 ficha gratis)' : 'No se activo (sistema frenado o tope alcanzado)');
 });
 
-// Venta cobrada en efectivo. Queda registrada en la caja del dia para que
-// el reparto con el bar salga bien.
-app.get('/efectivo', function (req, res) {
-  if (!claveOk(req)) return res.status(403).send('clave invalida');
-  const monto = parseInt(req.query.monto, 10);
-  const combo = COMBOS.find(function (c) { return c.monto === monto; });
-  if (!combo) return res.status(400).send('Monto invalido. Usar 2000, 5500, 10000 o 20000');
-
-  if (!shellyVivo()) {
-    return res.send('NO COBRES POR ACA: la maquina esta desconectada y este boton no puede entregar los tiros. Que paguen por el BILLETERO de la maquina, que funciona igual.');
-  }
-
-  const ok = agregarFichas(combo.fichas, 'EFECTIVO $' + monto);
-  if (!ok) return res.send('No se activo (sistema frenado o tope alcanzado). No cobres.');
-
-  registrarVenta(monto, combo.fichas, 'efectivo', '');
-  res.send('Cobrado en efectivo $' + monto + ' -> ' + combo.fichas + ' fichas activadas');
-});
-
 app.get('/pausa', function (req, res) {
   if (!claveOk(req)) return res.status(403).send('clave invalida');
   bloqueado = true;
@@ -607,8 +623,6 @@ app.get('/caja', function (req, res) {
   txt += 'TOTAL          $' + r.total + '\n';
   txt += 'operaciones    ' + r.operaciones + '\n';
   txt += 'fichas dadas   ' + r.fichas + '\n\n';
-  txt += 'por QR         $' + r.totalQR + '  (' + r.cantidadQR + ')\n';
-  txt += 'en efectivo    $' + r.totalEfectivo + '  (' + r.cantidadEfectivo + ')\n\n';
   txt += 'POR COMBO\n';
   Object.keys(r.porCombo).sort().forEach(function (k) {
     txt += '  ' + k + ' x' + r.porCombo[k].cantidad + ' = $' + r.porCombo[k].total + '\n';
@@ -625,6 +639,169 @@ app.get('/caja', function (req, res) {
   });
   if (r.ventas.length === 0) txt += '  todavia no hubo ventas en esta jornada\n';
   res.type('text/plain').send(txt);
+});
+
+// ===== PANEL DEL DUENIO =====
+app.get('/admin', function (req, res) {
+  const vivo = shellyVivo();
+  const segDesdePoll = ultimoPoll ? Math.round((Date.now() - ultimoPoll) / 1000) : -1;
+  const r = resumenJornada();
+  const historial = jornadasPrevias(7);
+  const c = CLAVE ? ('?clave=' + encodeURIComponent(CLAVE)) : '';
+  const cAmp = CLAVE ? ('&clave=' + encodeURIComponent(CLAVE)) : '';
+
+  let estadoColor, estadoTexto;
+  if (bloqueado) { estadoColor = 'rojo'; estadoTexto = 'FRENADO — ' + motivoBloqueo; }
+  else if (!vivo) { estadoColor = 'rojo'; estadoTexto = 'MAQUINA DESCONECTADA — QR cortado'; }
+  else if (qrCortado || mpFallando) { estadoColor = 'ambar'; estadoTexto = 'QR SIN SERVICIO — solo billetero'; }
+  else { estadoColor = 'verde'; estadoTexto = 'EN LINEA — vista hace ' + segDesdePoll + ' s'; }
+
+  const maxHist = Math.max.apply(null, historial.map(function (h) { return h.total; }).concat([1]));
+
+  let filasHist = '';
+  historial.forEach(function (h, i) {
+    const d = new Date(h.desde);
+    const ancho = Math.round((h.total / maxHist) * 100);
+    filasHist +=
+      '<div class="hist-fila">' +
+      '<span class="hist-dia">' + (i === 0 ? 'hoy' : d.toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit' })) + '</span>' +
+      '<span class="hist-barra"><i style="width:' + ancho + '%"></i></span>' +
+      '<span class="hist-monto">' + (h.total ? '$' + h.total.toLocaleString('es-AR') : '—') + '</span>' +
+      '</div>';
+  });
+
+  let filasCombo = '';
+  const ordenCombos = [2000, 5500, 10000, 20000];
+  ordenCombos.forEach(function (m) {
+    const k = '$' + m;
+    const dato = r.porCombo[k];
+    filasCombo +=
+      '<div class="combo">' +
+      '<span class="combo-precio">$' + m.toLocaleString('es-AR') + '</span>' +
+      '<span class="combo-cant">' + (dato ? dato.cantidad + '' : '0') + '</span>' +
+      '</div>';
+  });
+
+  const html = '<!DOCTYPE html><html lang="es"><head>' +
+'<meta charset="utf-8">' +
+'<meta name="viewport" content="width=device-width,initial-scale=1">' +
+'<meta http-equiv="refresh" content="30">' +
+'<title>BPK</title>' +
+'<link rel="preconnect" href="https://fonts.googleapis.com">' +
+'<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
+'<link href="https://fonts.googleapis.com/css2?family=Anton&family=Share+Tech+Mono&display=swap" rel="stylesheet">' +
+'<style>' +
+':root{--fondo:#1A0E0E;--sup:#241414;--borde:#3A2020;--cuero:#7A2E2E;--hueso:#EDE4D8;--tenue:#9A8378;--led:#FFB020;--ok:#4E9B5F;--mal:#D8443C;--medio:#E08A2B}' +
+'*{box-sizing:border-box}' +
+'body{margin:0;background:var(--fondo);color:var(--hueso);font-family:-apple-system,system-ui,sans-serif;padding:0 0 40px}' +
+'.tope{padding:20px 18px 14px;border-bottom:1px solid var(--borde)}' +
+'.marca{font-family:Anton,Impact,sans-serif;font-size:34px;letter-spacing:.06em;line-height:1;text-transform:uppercase;margin:0}' +
+'.marca em{font-style:normal;color:var(--cuero)}' +
+'.sub{font-family:"Share Tech Mono",monospace;font-size:12px;color:var(--tenue);letter-spacing:.14em;text-transform:uppercase;margin-top:6px}' +
+'.tira{display:flex;align-items:center;gap:9px;padding:11px 18px;font-family:"Share Tech Mono",monospace;font-size:13px;letter-spacing:.06em;border-bottom:1px solid var(--borde)}' +
+'.tira i{width:9px;height:9px;border-radius:50%;flex:none}' +
+'.verde i{background:var(--ok);box-shadow:0 0 9px var(--ok)}' +
+'.ambar i{background:var(--medio);box-shadow:0 0 9px var(--medio)}' +
+'.rojo i{background:var(--mal);box-shadow:0 0 9px var(--mal)}' +
+'.verde{color:var(--ok)}.ambar{color:var(--medio)}.rojo{color:var(--mal)}' +
+'.tablero{padding:30px 18px 24px;text-align:center;border-bottom:1px solid var(--borde)}' +
+'.tablero .rot{font-family:"Share Tech Mono",monospace;font-size:11px;letter-spacing:.24em;color:var(--tenue);text-transform:uppercase}' +
+'.cifra{font-family:"Share Tech Mono",monospace;font-size:62px;line-height:1.05;color:var(--led);text-shadow:0 0 22px rgba(255,176,32,.32);margin:8px 0 2px;letter-spacing:.02em}' +
+'.cifra small{font-size:26px;opacity:.55}' +
+'.trio{display:flex;justify-content:center;gap:26px;margin-top:16px}' +
+'.trio div{text-align:center}' +
+'.trio b{display:block;font-family:"Share Tech Mono",monospace;font-size:21px;color:var(--hueso)}' +
+'.trio span{font-size:10px;letter-spacing:.16em;color:var(--tenue);text-transform:uppercase}' +
+'.seccion{padding:22px 18px;border-bottom:1px solid var(--borde)}' +
+'.titulo{font-family:Anton,Impact,sans-serif;font-size:15px;letter-spacing:.1em;text-transform:uppercase;color:var(--tenue);margin:0 0 14px}' +
+'.hist-fila{display:flex;align-items:center;gap:10px;margin-bottom:7px}' +
+'.hist-dia{font-family:"Share Tech Mono",monospace;font-size:11px;color:var(--tenue);width:38px;flex:none}' +
+'.hist-barra{flex:1;height:16px;background:#2E1A1A;border-radius:2px;overflow:hidden}' +
+'.hist-barra i{display:block;height:100%;background:var(--cuero)}' +
+'.hist-monto{font-family:"Share Tech Mono",monospace;font-size:12px;width:74px;text-align:right;flex:none}' +
+'.combos{display:flex;gap:8px}' +
+'.combo{flex:1;background:var(--sup);border:1px solid var(--borde);border-radius:8px;padding:11px 4px;text-align:center}' +
+'.combo-precio{display:block;font-size:10px;color:var(--tenue);font-family:"Share Tech Mono",monospace}' +
+'.combo-cant{display:block;font-family:"Share Tech Mono",monospace;font-size:22px;color:var(--hueso);margin-top:3px}' +
+'.reparto{display:flex;justify-content:space-between;font-family:"Share Tech Mono",monospace;font-size:14px;padding:8px 0;border-bottom:1px solid var(--borde)}' +
+'.reparto:last-child{border-bottom:0}' +
+'.reparto span{color:var(--tenue)}' +
+'.botones{display:grid;grid-template-columns:1fr 1fr;gap:8px}' +
+'.b{display:block;text-align:center;text-decoration:none;padding:14px 8px;border-radius:9px;font-size:14px;font-weight:600;background:var(--sup);color:var(--hueso);border:1px solid var(--borde)}' +
+'.b.ancho{grid-column:1/-1}' +
+'.b.alerta{background:#4A1717;border-color:#6E2222;color:#FFC9C4}' +
+'.b.bien{background:#173A21;border-color:#22562F;color:#C3EBCE}' +
+'.b:focus-visible{outline:2px solid var(--led);outline-offset:2px}' +
+'.datos{font-family:"Share Tech Mono",monospace;font-size:12px;line-height:1.9;color:var(--tenue)}' +
+'.datos b{color:var(--hueso);font-weight:400}' +
+'.pie{padding:20px 18px;text-align:center;font-family:"Share Tech Mono",monospace;font-size:11px;color:#6B564E;line-height:1.8}' +
+'@media(prefers-reduced-motion:reduce){*{transition:none!important}}' +
+'</style></head><body>' +
+
+'<div class="tope">' +
+'<h1 class="marca">Beer<em>punch</em></h1>' +
+'<div class="sub">Beerlin · Arístides Villanueva 129</div>' +
+'</div>' +
+
+'<div class="tira ' + estadoColor + '"><i></i>' + estadoTexto + '</div>' +
+
+'<div class="tablero">' +
+'<div class="rot">Caja de la jornada</div>' +
+'<div class="cifra"><small>$</small>' + r.total.toLocaleString('es-AR') + '</div>' +
+'<div class="trio">' +
+'<div><b>' + r.fichas + '</b><span>tiros</span></div>' +
+'<div><b>' + r.operaciones + '</b><span>ventas</span></div>' +
+'<div><b>' + (r.operaciones ? Math.round(r.total / r.operaciones).toLocaleString('es-AR') : 0) + '</b><span>promedio</span></div>' +
+'</div></div>' +
+
+'<div class="seccion">' +
+'<h2 class="titulo">Últimas 7 jornadas</h2>' + filasHist + '</div>' +
+
+'<div class="seccion">' +
+'<h2 class="titulo">Qué se vendió hoy</h2>' +
+'<div class="combos">' + filasCombo + '</div>' +
+'<div style="margin-top:14px">' +
+'<div class="reparto"><span>Le toca al bar (' + PORCENTAJE_BAR + '%)</span><b>$' + r.paraBar.toLocaleString('es-AR') + '</b></div>' +
+'<div class="reparto"><span>Te queda a vos</span><b>$' + (r.total - r.paraBar).toLocaleString('es-AR') + '</b></div>' +
+'</div></div>' +
+
+'<div class="seccion">' +
+'<h2 class="titulo">Controles</h2>' +
+'<div class="botones">' +
+'<a class="b bien ancho" href="/gratis' + c + '">Dar un tiro gratis</a>' +
+'<a class="b alerta" href="/pausa' + c + '">Frenar todo</a>' +
+'<a class="b bien" href="/reanudar' + c + '">Reanudar</a>' +
+'<a class="b" href="/reset' + c + '">Vaciar cola</a>' +
+'<a class="b" href="/setup">Resincronizar MP</a>' +
+'</div></div>' +
+
+'<div class="seccion">' +
+'<h2 class="titulo">Máquina</h2>' +
+'<div class="datos">' +
+'Última señal · <b>' + (segDesdePoll < 0 ? 'nunca' : 'hace ' + segDesdePoll + ' s') + '</b><br>' +
+'Encendida desde · <b>' + (ultimoArranqueShelly ? new Date(ultimoArranqueShelly).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) : 'sin dato') + '</b><br>' +
+'Se desconectó · <b>' + desconexionesHoy + ' ' + (desconexionesHoy === 1 ? 'vez' : 'veces') + '</b><br>' +
+'Fichas en cola · <b>' + pendingActivation + '</b><br>' +
+'Sin confirmar · <b>' + (entregaEnVuelo ? entregaEnVuelo.n : 0) + '</b><br>' +
+'QR de Mercado Pago · <b>' + (qrCortado ? 'cortado' : 'activo') + '</b><br>' +
+'Avisos al celular · <b>' + (NTFY_TOPIC ? 'sí' : 'NO CONFIGURADOS') + '</b><br>' +
+'Memoria del log · <b>' + (persistenciaOk ? 'guardada' : 'SE PIERDE AL REINICIAR') + '</b><br>' +
+'Servidor desde · <b>' + new Date(arranque).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) + '</b>' +
+'</div></div>' +
+
+'<div class="seccion">' +
+'<h2 class="titulo">Ver más</h2>' +
+'<div class="botones">' +
+'<a class="b" href="/log">Historial</a>' +
+'<a class="b" href="/caja">Caja detallada</a>' +
+'<a class="b" href="/panel">Panel del bar</a>' +
+'<a class="b" href="/probar-aviso">Probar aviso</a>' +
+'</div></div>' +
+
+'<div class="pie">Se actualiza solo cada 30 segundos<br>' + hora() + '</div>' +
+'</body></html>';
+
+  res.type('text/html').send(html);
 });
 
 // ===== PANEL PARA EL BAR =====
@@ -644,7 +821,7 @@ app.get('/panel', function (req, res) {
     color = '#c0392b'; titulo = 'QR CAÍDO';
     detalle = 'La máquina no habla con el servidor hace ' + minCaido + ' min.<br><br>' +
       '<b>SÍ funciona:</b> el billetero. Que paguen con monedas o billetes directo en la máquina.<br>' +
-      '<b>NO funciona:</b> el QR (lo corté a propósito para que nadie pierda plata) ni los botones de efectivo de acá abajo.<br><br>' +
+      '<b>NO funciona:</b> el QR. Lo corté a propósito para que nadie pague algo que la máquina no le va a dar.<br><br>' +
       '<b>TAPAR EL CARTEL DEL QR.</b>';
     diagnostico =
       '<div class="box"><h2>Cómo arreglarlo</h2>' +
@@ -656,9 +833,12 @@ app.get('/panel', function (req, res) {
       'Entrá a Scripts, tocá Stop y después Start.<br><br>' +
       '<b>2.</b> Cuando vuelva, el QR se reactiva solo y las fichas en cola caen en la máquina.' +
       '</p></div>';
-  } else if (qrCortado) {
-    color = '#e67e22'; titulo = 'QR NO DISPONIBLE';
-    detalle = 'La máquina funciona pero el QR está cortado.<br><b>Cobrar en efectivo</b> con los botones de abajo, o por billetero.';
+  } else if (qrCortado || mpFallando) {
+    color = '#e67e22'; titulo = 'QR SIN SERVICIO';
+    detalle = 'La máquina anda bien, pero el QR no funciona.<br><br>' +
+      '<b>Que paguen por el billetero</b> con monedas o billetes.<br>' +
+      'El combo de 3 tiros ($5.500) no se puede vender mientras el QR esté caído.<br><br>' +
+      'Tapar el cartel del QR y avisar a Fausto.';
   } else {
     color = '#1e8449'; titulo = 'TODO OK';
     detalle = 'La máquina está conectada y el QR funciona.<br>Se puede jugar normal.';
@@ -691,12 +871,6 @@ app.get('/panel', function (req, res) {
     '<div class="fila"><span>Tiros vendidos</span><b>' + r.fichas + '</b></div>' +
     '<div class="fila"><span>Operaciones</span><b>' + r.operaciones + '</b></div>' +
     '<a class="btn gris" href="/caja">Ver caja detallada</a></div>' +
-
-    '<div class="box"><h2>Cobrar en efectivo</h2>' +
-    '<a class="btn verde" href="/efectivo?monto=2000' + (c ? '&clave=' + encodeURIComponent(CLAVE) : '') + '">$2.000 - 1 tiro</a>' +
-    '<a class="btn verde" href="/efectivo?monto=5500' + (c ? '&clave=' + encodeURIComponent(CLAVE) : '') + '">$5.500 - 3 tiros</a>' +
-    '<a class="btn verde" href="/efectivo?monto=10000' + (c ? '&clave=' + encodeURIComponent(CLAVE) : '') + '">$10.000 - 8 tiros</a>' +
-    '<a class="btn verde" href="/efectivo?monto=20000' + (c ? '&clave=' + encodeURIComponent(CLAVE) : '') + '">$20.000 - 20 tiros</a></div>' +
 
     '<div class="box"><h2>Otros</h2>' +
     '<a class="btn" href="/gratis' + c + '">Dar 1 tiro gratis</a>' +
