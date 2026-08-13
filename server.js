@@ -13,7 +13,7 @@ app.use(express.urlencoded({ extended: true }));
 // ============================================================
 //  BPK / BeerPunch - servidor de creditos
 //  v6: corta el QR si el Shelly esta caido, panel para el bar,
-//      caja del dia, log limpio, cobro solo por QR y billetero.
+//      caja del dia, avisos por horario, resumen semanal, cupones QR.
 // ============================================================
 
 const MP_TOKEN = process.env.MP_ACCESS_TOKEN || '';
@@ -56,6 +56,8 @@ const PORCENTAJE_BAR = 20;  // lo que le toca a Andres sobre el neto
 
 const NTFY_TOPIC = process.env.NTFY_TOPIC || '';
 let alertaShellyActiva = false;
+let avisoOlvidoEnviado = false;
+
 let qrCortado = false;
 let mpFallando = false;
 
@@ -64,6 +66,9 @@ const DATA_DIR = '/data';
 const F_PAGOS = path.join(DATA_DIR, 'pagos.json');
 const F_LOG = path.join(DATA_DIR, 'log.json');
 const F_VENTAS = path.join(DATA_DIR, 'ventas.json');
+// Historial de cuando la maquina se apago y se prendio. Sirve para ver a que
+// hora la estan apagando de verdad, que no siempre coincide con el cierre.
+const F_ENCENDIDOS = path.join(DATA_DIR, 'encendidos.json');
 let persistenciaOk = false;
 
 try {
@@ -81,6 +86,17 @@ function leerJSON(archivo, porDefecto) {
     return JSON.parse(fs.readFileSync(archivo, 'utf8'));
   } catch (e) {
     return porDefecto;
+  }
+}
+
+let encendidos = [];
+
+function anotarEncendido(tipo, detalle) {
+  encendidos.push({ ts: Date.now(), tipo: tipo, detalle: detalle || '' });
+  const limite = Date.now() - 60 * 24 * 60 * 60 * 1000;
+  encendidos = encendidos.filter(function (e) { return e.ts > limite; });
+  if (persistenciaOk) {
+    try { fs.writeFileSync(F_ENCENDIDOS, JSON.stringify(encendidos)); } catch (e) {}
   }
 }
 
@@ -109,10 +125,12 @@ let bloqueado = false;
 let motivoBloqueo = '';
 let historialFichas = [];
 let eventos = leerJSON(F_LOG, []);
+const eventosRecuperados = eventos.length;
 let ventas = leerJSON(F_VENTAS, []);
 let ultimoGratis = 0;
 let ultimoPoll = 0;
 let pagosProcesados = leerJSON(F_PAGOS, {});
+encendidos = leerJSON(F_ENCENDIDOS, []);
 let cantidadProcesados = Object.keys(pagosProcesados).length;
 let ultimoArranqueShelly = 0;
 let desconexionesHoy = 0;
@@ -159,9 +177,35 @@ function horaArg() {
   return now.getHours();
 }
 
+// Horarios reales de Beerlin:
+//   domingo a jueves  17:00 a 3:30
+//   viernes y sabado  17:00 a 4:30
+// La madrugada pertenece a la noche del dia anterior.
+const HORA_ABRE = 17;
+
+function ahoraArg() {
+  const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+  return { dia: d.getDay(), minutos: d.getHours() * 60 + d.getMinutes() };
+}
+
+function minutoDeCierre() {
+  const t = ahoraArg();
+  const nocheDe = (t.dia + 6) % 7;              // de que dia es esta madrugada
+  return (nocheDe === 5 || nocheDe === 6) ? (4 * 60 + 30) : (3 * 60 + 30);
+}
+
 function enHorarioDeBar() {
-  const h = horaArg();
-  return (h >= 17 || h < 5);
+  const t = ahoraArg();
+  if (t.minutos >= HORA_ABRE * 60) return true;  // de las 17 en adelante
+  return t.minutos < minutoDeCierre();           // madrugada, hasta que cierran
+}
+
+// Margen despues de abrir: si a esta hora la maquina sigue apagada, alguien
+// se olvido de prenderla y se estan perdiendo ventas sin que nadie lo note.
+function yaDeberiaEstarPrendida() {
+  const t = ahoraArg();
+  if (t.minutos >= (HORA_ABRE + 1) * 60) return true;
+  return t.minutos < minutoDeCierre();
 }
 
 // ===== AVISOS AL CELULAR =====
@@ -450,28 +494,169 @@ async function vigilarShelly() {
   }
 
   if (caido && !alertaShellyActiva) {
-    alertaShellyActiva = true;
-    avisar(
-      'BPK - QR caido',
-      'El Shelly no responde hace ' + silencioMin + ' min.\n' +
-      'Ya corte el QR para que nadie pague algo que no podemos entregar.\n' +
-      'Fichas en cola esperando: ' + pendingActivation + '\n\n' +
-      'EL BILLETERO SIGUE ANDANDO: que cobren ahi mientras tanto.\n\n' +
-      'Para arreglarlo: mira la app de Shelly.\n' +
-      '- Si dice sin conexion -> cortar la luz de la maquina 10 seg\n' +
-      '- Si dice online -> Scripts, Stop y Start\n\n' +
-      'Panel: ' + (BASE_URL || '') + '/panel',
-      enHorarioDeBar()
-    );
+    // Si el bar esta cerrado, que la maquina este apagada es lo esperable.
+    // Se registra en el log pero no suena el telefono: un aviso que llega
+    // todas las noches deja de significar algo.
+    anotarEncendido('apagada', 'silencio de ' + silencioMin + ' min');
+    if (!enHorarioDeBar()) {
+      alertaShellyActiva = true;
+      log('MAQUINA APAGADA', 'dejo de responder (bar cerrado, no se avisa al celular)');
+    } else {
+      alertaShellyActiva = true;
+      avisar(
+        'BPK - QR caido',
+        'El Shelly no responde hace ' + silencioMin + ' min.\n' +
+        'Ya corte el QR para que nadie pague algo que no podemos entregar.\n' +
+        'Fichas en cola esperando: ' + pendingActivation + '\n\n' +
+        'EL BILLETERO SIGUE ANDANDO: que cobren ahi mientras tanto.\n\n' +
+        'Para arreglarlo: mira la app de Shelly.\n' +
+        '- Si dice sin conexion -> cortar la luz de la maquina 10 seg\n' +
+        '- Si dice online -> Scripts, Stop y Start\n\n' +
+        'Panel: ' + (BASE_URL || '') + '/panel',
+        true
+      );
+    }
   }
 
   if (!caido && alertaShellyActiva) {
     alertaShellyActiva = false;
-    avisar('BPK - Maquina OK', 'El Shelly volvio y el QR esta activo de nuevo.', false);
+    avisoOlvidoEnviado = false;
+    anotarEncendido('prendida', '');
+    if (enHorarioDeBar()) {
+      avisar('BPK - Maquina OK', 'El Shelly volvio y el QR esta activo de nuevo.', false);
+    } else {
+      log('SHELLY OK', 'volvio, pero el bar esta cerrado: no se avisa');
+    }
+  }
+
+  // El bar ya abrio hace rato y la maquina sigue muerta. Nadie se dio cuenta.
+  if (caido && yaDeberiaEstarPrendida() && !avisoOlvidoEnviado) {
+    avisoOlvidoEnviado = true;
+    log('MAQUINA APAGADA', 'el bar ya abrio y la maquina sigue sin dar senal');
+    avisar(
+      'BPK - La maquina sigue apagada',
+      'Ya es horario de bar y la maquina no da senal hace ' + silencioMin + ' min.\n' +
+      'Puede ser que se olvidaron de prenderla.\n\n' +
+      'Mientras siga asi no entra plata por QR.',
+      true
+    );
   }
 }
 
 setInterval(vigilarShelly, 30 * 1000);
+
+// ===== RESUMEN SEMANAL =====
+// Todos los lunes al mediodia llega al celular como cerro la semana.
+// Se guarda cual fue el ultimo enviado para no repetirlo si el server reinicia.
+const F_SEMANA = path.join(DATA_DIR, 'semana.json');
+let ultimaSemanaEnviada = leerJSON(F_SEMANA, { marca: '' });
+
+function marcaDeSemana() {
+  const inicio = inicioJornada();
+  const dia = 24 * 60 * 60 * 1000;
+  return String(Math.floor(inicio / (7 * dia)));
+}
+
+function resumenSemanal() {
+  const dia = 24 * 60 * 60 * 1000;
+  const hasta = inicioJornada();
+  const desde = hasta - 7 * dia;
+  const v = ventas.filter(function (x) { return x.ts >= desde && x.ts < hasta; });
+
+  const total = v.reduce(function (a, x) { return a + x.monto; }, 0);
+  const fichas = v.reduce(function (a, x) { return a + x.fichas; }, 0);
+
+  const porNoche = {};
+  v.forEach(function (x) {
+    // ubicar en que noche de la semana cayo
+    let k = Math.floor((x.ts - desde) / dia);
+    if (!porNoche[k]) porNoche[k] = 0;
+    porNoche[k] += x.monto;
+  });
+  let mejorK = null;
+  Object.keys(porNoche).forEach(function (k) {
+    if (mejorK === null || porNoche[k] > porNoche[mejorK]) mejorK = k;
+  });
+
+  const porCombo = {};
+  v.forEach(function (x) {
+    porCombo[x.monto] = (porCombo[x.monto] || 0) + 1;
+  });
+  let comboTop = null;
+  Object.keys(porCombo).forEach(function (m) {
+    if (comboTop === null || porCombo[m] > porCombo[comboTop]) comboTop = m;
+  });
+
+  return {
+    desde: desde, hasta: hasta, total: total, fichas: fichas,
+    operaciones: v.length,
+    paraBar: Math.round(total * PORCENTAJE_BAR / 100),
+    mejorNoche: mejorK === null ? null : { fecha: desde + Number(mejorK) * dia, total: porNoche[mejorK] },
+    comboTop: comboTop,
+    comboTopCant: comboTop ? porCombo[comboTop] : 0
+  };
+}
+
+function revisarResumenSemanal() {
+  const arg = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+  // lunes = 1, y despues del mediodia para que la jornada del domingo ya cerro
+  if (arg.getDay() !== 1 || arg.getHours() < 12) return;
+
+  const marca = marcaDeSemana();
+  if (ultimaSemanaEnviada.marca === marca) return;
+
+  const s = resumenSemanal();
+  ultimaSemanaEnviada = { marca: marca };
+  if (persistenciaOk) {
+    try { fs.writeFileSync(F_SEMANA, JSON.stringify(ultimaSemanaEnviada)); } catch (e) {}
+  }
+
+  const f = function (ts) {
+    return new Date(ts).toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit' });
+  };
+
+  let texto =
+    'Semana del ' + f(s.desde) + ' al ' + f(s.hasta - 1) + '\n\n' +
+    'TOTAL          $' + s.total.toLocaleString('es-AR') + '\n' +
+    'Tiros            ' + s.fichas + '\n' +
+    'Ventas           ' + s.operaciones + '\n\n' +
+    'Para el bar    $' + s.paraBar.toLocaleString('es-AR') + '\n' +
+    'Para vos       $' + (s.total - s.paraBar).toLocaleString('es-AR') + '\n';
+
+  if (s.mejorNoche) {
+    texto += '\nMejor noche: ' + f(s.mejorNoche.fecha) + ' con $' + s.mejorNoche.total.toLocaleString('es-AR') + '\n';
+  }
+  if (s.comboTop) {
+    texto += 'Combo mas vendido: $' + Number(s.comboTop).toLocaleString('es-AR') + ' (' + s.comboTopCant + ' veces)\n';
+  }
+  if (s.operaciones === 0) {
+    texto = 'Semana del ' + f(s.desde) + ' al ' + f(s.hasta - 1) + '\n\nNo hubo ventas por QR esta semana.\n(No cuenta lo que entro por el billetero.)';
+  }
+
+  log('RESUMEN', 'resumen semanal enviado: $' + s.total);
+  avisar('BPK - Resumen de la semana', texto, false);
+}
+
+setInterval(revisarResumenSemanal, 10 * 60 * 1000);
+
+// Endpoint para verlo cuando quieras, sin esperar al lunes.
+app.get('/semana', function (req, res) {
+  const s = resumenSemanal();
+  const f = function (ts) {
+    return new Date(ts).toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit' });
+  };
+  let txt = 'SEMANA DEL ' + f(s.desde) + ' AL ' + f(s.hasta - 1) + '\n';
+  txt += '==============================\n\n';
+  txt += 'TOTAL        $' + s.total.toLocaleString('es-AR') + '\n';
+  txt += 'Tiros        ' + s.fichas + '\n';
+  txt += 'Ventas       ' + s.operaciones + '\n\n';
+  txt += 'Para el bar  $' + s.paraBar.toLocaleString('es-AR') + '\n';
+  txt += 'Para vos     $' + (s.total - s.paraBar).toLocaleString('es-AR') + '\n';
+  if (s.mejorNoche) txt += '\nMejor noche  ' + f(s.mejorNoche.fecha) + '  $' + s.mejorNoche.total.toLocaleString('es-AR') + '\n';
+  if (s.comboTop) txt += 'Combo top    $' + Number(s.comboTop).toLocaleString('es-AR') + ' (' + s.comboTopCant + ')\n';
+  txt += '\nNo incluye lo que entra por el billetero.\n';
+  res.type('text/plain').send(txt);
+});
 
 // ===== ENDPOINTS =====
 
@@ -515,6 +700,346 @@ app.get('/estado', function (req, res) {
     'arranque server = ' + new Date(arranque).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) + '\n' +
     'hora servidor = ' + hora()
   );
+});
+
+// ============================================================
+//  CUPONES / ACTIVACIONES
+//  Cupon impreso con QR -> el cliente escanea -> pagina con boton ->
+//  toca "Activar" -> sale 1 tiro gratis.
+//  El codigo se quema recien al tocar el boton (no al escanear), asi el
+//  preview de WhatsApp no lo gasta y el cliente entiende que tiene que
+//  estar parado en la maquina.
+// ============================================================
+
+const F_CUPONES = path.join(DATA_DIR, 'cupones.json');
+const F_CANJES = path.join(DATA_DIR, 'canjes.json');
+const VENTANA_CONVERSION_MS = 15 * 60 * 1000;  // margen para contar si compro despues
+const FICHAS_POR_CUPON = 1;
+
+let cupones = leerJSON(F_CUPONES, {});   // { CODIGO: {lote, usado: ts|null} }
+let canjes = leerJSON(F_CANJES, []);     // [{ts, codigo, lote, convertido:false}]
+
+function guardarCupones() {
+  if (!persistenciaOk) return;
+  try {
+    fs.writeFileSync(F_CUPONES, JSON.stringify(cupones));
+    fs.writeFileSync(F_CANJES, JSON.stringify(canjes));
+  } catch (e) {
+    rutina('ERROR', 'guardando cupones: ' + e.message);
+  }
+}
+
+// Sin letras ni numeros que se confundan al leerlos de un papel:
+// nada de O/0 ni I/1. Todo en mayuscula para que el QR salga mas chico.
+const ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function codigoNuevo(largo) {
+  let c = '';
+  const bytes = crypto.randomBytes(largo);
+  for (let i = 0; i < largo; i++) c += ALFABETO[bytes[i] % ALFABETO.length];
+  return c;
+}
+
+function generarLote(lote, cantidad) {
+  const nuevos = [];
+  let intentos = 0;
+  while (nuevos.length < cantidad && intentos < cantidad * 50) {
+    intentos++;
+    const c = codigoNuevo(6);
+    if (cupones[c]) continue;
+    cupones[c] = { lote: lote, usado: null };
+    nuevos.push(c);
+  }
+  guardarCupones();
+  return nuevos;
+}
+
+function statsCupones(lote) {
+  const codigos = Object.keys(cupones).filter(function (c) {
+    return !lote || cupones[c].lote === lote;
+  });
+  const usados = codigos.filter(function (c) { return cupones[c].usado; });
+  const desde = inicioJornada();
+  const hoy = canjes.filter(function (x) { return x.ts >= desde; });
+  const convertidos = canjes.filter(function (x) { return x.convertido; });
+  return {
+    total: codigos.length,
+    usados: usados.length,
+    disponibles: codigos.length - usados.length,
+    canjesHoy: hoy.length,
+    canjesTotal: canjes.length,
+    convertidos: convertidos.length,
+    conversion: canjes.length ? Math.round(convertidos.length * 100 / canjes.length) : 0
+  };
+}
+
+// Cuando entra un pago, si hubo un canje hace poco lo contamos como que el
+// cupon funciono: el tipo probo gratis y despues compro. Es la unica forma
+// de saber si vale la pena seguir imprimiendo cupones.
+function marcarConversion() {
+  const limite = Date.now() - VENTANA_CONVERSION_MS;
+  for (let i = canjes.length - 1; i >= 0; i--) {
+    if (canjes[i].ts < limite) break;
+    if (!canjes[i].convertido) {
+      canjes[i].convertido = true;
+      log('CUPON CONVIRTIO', 'un canje de hace ' + Math.round((Date.now() - canjes[i].ts) / 60000) + ' min termino en compra');
+      guardarCupones();
+      return;
+    }
+  }
+}
+
+function paginaCupon(titulo, cuerpo, color, boton) {
+  return '<!DOCTYPE html><html lang="es"><head>' +
+    '<meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<title>BeerPunch</title>' +
+    '<link rel="preconnect" href="https://fonts.googleapis.com">' +
+    '<link href="https://fonts.googleapis.com/css2?family=Anton&display=swap" rel="stylesheet">' +
+    '<style>' +
+    'body{margin:0;min-height:100vh;background:#1A0E0E;color:#EDE4D8;' +
+    'font-family:-apple-system,system-ui,sans-serif;display:flex;flex-direction:column;' +
+    'align-items:center;justify-content:center;padding:28px;text-align:center}' +
+    '.marca{font-family:Anton,Impact,sans-serif;font-size:24px;letter-spacing:.08em;' +
+    'text-transform:uppercase;color:#7A2E2E;margin-bottom:26px}' +
+    'h1{font-family:Anton,Impact,sans-serif;font-size:44px;line-height:1.05;margin:0 0 16px;' +
+    'text-transform:uppercase;color:' + color + '}' +
+    'p{font-size:17px;line-height:1.6;margin:0 0 12px;max-width:340px}' +
+    '.chico{font-size:14px;color:#9A8378;margin-top:22px;max-width:320px}' +
+    'button{font-family:Anton,Impact,sans-serif;font-size:24px;letter-spacing:.06em;' +
+    'text-transform:uppercase;background:#FFB020;color:#1A0E0E;border:0;border-radius:14px;' +
+    'padding:22px 44px;margin-top:26px;width:100%;max-width:340px;cursor:pointer}' +
+    'button:disabled{opacity:.5}' +
+    '</style></head><body>' +
+    '<div class="marca">BeerPunch · Beerlin</div>' +
+    '<h1>' + titulo + '</h1>' + cuerpo + (boton || '') +
+    '</body></html>';
+}
+
+// Paso 1: el cliente escanea. Esto NO gasta el cupon.
+// Se aceptan varias direcciones porque los cupones impresos de lotes viejos
+// pueden apuntar a un camino distinto. Todas hacen lo mismo.
+function paginaEscaneo(req, res) {
+  const cod = String(req.params.codigo || '').toUpperCase();
+  const cup = cupones[cod];
+
+  if (!cup) {
+    return res.type('text/html').send(paginaCupon(
+      'Cupón no válido',
+      '<p>Este código no existe. Puede estar mal escaneado.</p>' +
+      '<p class="chico">Pedile otro cupón al mozo.</p>',
+      '#D8443C'));
+  }
+
+  if (cup.usado) {
+    const cuando = new Date(cup.usado).toLocaleString('es-AR', {
+      timeZone: 'America/Argentina/Buenos_Aires', hour12: false,
+      day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return res.type('text/html').send(paginaCupon(
+      'Cupón ya usado',
+      '<p>Este cupón se activó el ' + cuando + '.</p>' +
+      '<p class="chico">Cada cupón sirve una sola vez.</p>',
+      '#D8443C'));
+  }
+
+  if (!enHorarioDeBar()) {
+    return res.type('text/html').send(paginaCupon(
+      'Fuera de horario',
+      '<p>Los cupones se activan mientras el bar está abierto.</p>' +
+      '<p class="chico">Guardá el cupón: sigue estando disponible.</p>',
+      '#E08A2B'));
+  }
+
+  if (!shellyVivo() || bloqueado) {
+    return res.type('text/html').send(paginaCupon(
+      'La máquina no está disponible',
+      '<p>Ahora mismo la máquina no puede entregar tiros.</p>' +
+      '<p><b>No gastamos tu cupón.</b> Guardalo y probá en un rato.</p>' +
+      '<p class="chico">Avisale al mozo así lo revisan.</p>',
+      '#E08A2B'));
+  }
+
+  // El boton vuelve por el mismo camino por el que entro el cliente.
+  const rutaBase = '/' + String(req.path || '/c/').split('/')[1];
+
+  // El boton manda un POST por JavaScript. Los bots que hacen preview de los
+  // links no ejecutan JavaScript, asi que no pueden quemar el cupon.
+  const boton =
+    '<button id="b" onclick="activar()">Activar mi tiro</button>' +
+    '<p class="chico">Tocá el botón solo cuando estés parado en la máquina.<br>' +
+    'El tiro sale enseguida y no se puede guardar para después.</p>' +
+    '<script>' +
+    'function activar(){' +
+    'var b=document.getElementById("b");b.disabled=true;b.textContent="Activando...";' +
+    'fetch("' + rutaBase + '/' + cod + '/activar",{method:"POST"})' +
+    '.then(function(r){return r.text()})' +
+    '.then(function(t){document.open();document.write(t);document.close();})' +
+    '.catch(function(){b.disabled=false;b.textContent="Reintentar";});' +
+    '}</script>';
+
+  res.type('text/html').send(paginaCupon(
+    '1 tiro gratis',
+    '<p>Tenés un tiro de regalo en la máquina de boxeo.</p>',
+    '#FFB020', boton));
+}
+
+const RUTAS_CUPON = ['/c/:codigo', '/a/:codigo', '/cupon/:codigo', '/activar/:codigo'];
+RUTAS_CUPON.forEach(function (r) { app.get(r, paginaEscaneo); });
+
+// Paso 2: el cliente toca el boton. Recien aca se gasta.
+function activarCupon(req, res) {
+  const cod = String(req.params.codigo || '').toUpperCase();
+  const cup = cupones[cod];
+
+  if (!cup) {
+    return res.type('text/html').send(paginaCupon('Cupón no válido',
+      '<p>Este código no existe.</p>', '#D8443C'));
+  }
+
+  if (cup.usado) {
+    return res.type('text/html').send(paginaCupon('Cupón ya usado',
+      '<p>Este cupón se activó hace un rato.</p>', '#D8443C'));
+  }
+
+  if (!enHorarioDeBar()) {
+    return res.type('text/html').send(paginaCupon('Fuera de horario',
+      '<p>Guardá el cupón, no se gastó.</p>', '#E08A2B'));
+  }
+
+  if (!shellyVivo() || bloqueado) {
+    return res.type('text/html').send(paginaCupon('La máquina no está disponible',
+      '<p><b>No gastamos tu cupón.</b> Guardalo y probá en un rato.</p>', '#E08A2B'));
+  }
+
+  // Se marca usado ANTES de intentar entregar. Si dos personas tocan el boton
+  // al mismo tiempo con el mismo codigo, solo una pasa de aca.
+  cup.usado = Date.now();
+  guardarCupones();
+
+  const ok = agregarFichas(FICHAS_POR_CUPON, 'CUPON ' + cod);
+
+  if (!ok) {
+    // No se pudo entregar: devolvemos el cupon a disponible. El cliente no
+    // se queda sin nada por un problema nuestro.
+    cup.usado = null;
+    guardarCupones();
+    log('CUPON DEVUELTO', cod + ' no se pudo entregar, vuelve a estar disponible');
+    return res.type('text/html').send(paginaCupon('No se pudo activar',
+      '<p><b>Tu cupón sigue sirviendo.</b> Probá de nuevo en un minuto.</p>' +
+      '<p class="chico">Si sigue igual, avisale al mozo.</p>', '#E08A2B'));
+  }
+
+  canjes.push({ ts: Date.now(), codigo: cod, lote: cup.lote, convertido: false });
+  const limite = Date.now() - 90 * 24 * 60 * 60 * 1000;
+  canjes = canjes.filter(function (x) { return x.ts > limite; });
+  guardarCupones();
+  log('CUPON', cod + ' (lote ' + cup.lote + ') canjeado');
+
+  res.type('text/html').send(paginaCupon('¡Listo!',
+    '<p>Tu tiro ya está cargado en la máquina.</p>' +
+    '<p class="chico">Si no lo ves en unos segundos, avisale al mozo.</p>',
+    '#4E9B5F'));
+}
+
+RUTAS_CUPON.forEach(function (r) { app.post(r + '/activar', activarCupon); });
+
+// ===== ADMINISTRACION DE CUPONES =====
+
+app.get('/cupones', function (req, res) {
+  const s = statsCupones(req.query.lote);
+  const lotes = {};
+  Object.keys(cupones).forEach(function (c) {
+    const l = cupones[c].lote;
+    if (!lotes[l]) lotes[l] = { total: 0, usados: 0 };
+    lotes[l].total++;
+    if (cupones[c].usado) lotes[l].usados++;
+  });
+
+  let txt = 'CUPONES\n=======================\n\n';
+  txt += 'Impresos        ' + s.total + '\n';
+  txt += 'Usados          ' + s.usados + '\n';
+  txt += 'Sin usar        ' + s.disponibles + '\n\n';
+  txt += 'Canjes hoy      ' + s.canjesHoy + '\n';
+  txt += 'Canjes total    ' + s.canjesTotal + '\n\n';
+  txt += 'CONVIRTIERON EN COMPRA\n';
+  txt += '  ' + s.convertidos + ' de ' + s.canjesTotal + '  (' + s.conversion + '%)\n';
+  txt += '  = cuantos compraron un tiro dentro de los 15 min\n';
+  txt += '    despues de usar el cupon\n\n';
+  txt += 'POR LOTE\n';
+  Object.keys(lotes).sort().forEach(function (l) {
+    txt += '  ' + l + ': ' + lotes[l].usados + '/' + lotes[l].total + ' usados\n';
+  });
+  if (Object.keys(lotes).length === 0) txt += '  todavia no hay cupones cargados\n';
+  txt += '\nPara crear un lote nuevo:\n';
+  txt += '  /cupones/generar?lote=L3&cantidad=72&clave=' + (CLAVE || '') + '\n';
+  res.type('text/plain').send(txt);
+});
+
+// Importar cupones que YA fueron impresos con otro sistema. Los codigos
+// vienen separados por coma. No pisa los que ya existen.
+app.get('/cupones/importar', function (req, res) {
+  if (!claveOk(req)) return res.status(403).send('clave invalida');
+  const lote = String(req.query.lote || '').trim().toUpperCase();
+  const crudo = String(req.query.codigos || '').toUpperCase();
+  if (!lote) return res.status(400).send('Falta el lote. Ej: /cupones/importar?lote=L2&codigos=AAA111,BBB222&clave=...');
+
+  const lista = crudo.split(/[,\s]+/).map(function (c) { return c.trim(); }).filter(Boolean);
+  if (lista.length === 0) return res.status(400).send('No mandaste ningun codigo.');
+
+  let nuevos = 0, repetidos = 0;
+  const yaEstaban = [];
+  lista.forEach(function (c) {
+    if (cupones[c]) { repetidos++; yaEstaban.push(c); return; }
+    cupones[c] = { lote: lote, usado: null };
+    nuevos++;
+  });
+  guardarCupones();
+  log('CUPONES', 'lote ' + lote + ': ' + nuevos + ' importados');
+
+  let txt = 'IMPORTACION DEL LOTE ' + lote + '\n\n';
+  txt += 'Codigos recibidos   ' + lista.length + '\n';
+  txt += 'Cargados            ' + nuevos + '\n';
+  txt += 'Ya existian         ' + repetidos + '\n';
+  if (yaEstaban.length) txt += '\nRepetidos: ' + yaEstaban.join(', ') + '\n';
+  txt += '\nPara verificar, abri:\n' + (BASE_URL || '') + '/cupones\n';
+  res.type('text/plain').send(txt);
+});
+
+app.get('/cupones/generar', function (req, res) {
+  if (!claveOk(req)) return res.status(403).send('clave invalida');
+  const lote = String(req.query.lote || '').trim().toUpperCase();
+  const cantidad = Math.min(parseInt(req.query.cantidad, 10) || 0, 500);
+  if (!lote) return res.status(400).send('Falta el nombre del lote. Ej: /cupones/generar?lote=L3&cantidad=72');
+  if (cantidad < 1) return res.status(400).send('Falta la cantidad. Ej: /cupones/generar?lote=L3&cantidad=72');
+
+  const nuevos = generarLote(lote, cantidad);
+  log('CUPONES', 'lote ' + lote + ': ' + nuevos.length + ' cupones generados');
+  res.type('text/plain').send(
+    'Lote ' + lote + ': ' + nuevos.length + ' cupones creados.\n\n' +
+    'Para imprimirlos, abri:\n' +
+    (BASE_URL || '') + '/cupones/lista?lote=' + lote + '\n'
+  );
+});
+
+// Las direcciones salen en MAYUSCULA a proposito: un QR con solo mayusculas
+// y numeros usa un modo mas compacto y queda mas chico, o sea mas facil de
+// escanear cuando esta impreso en un cupon de papel.
+app.get('/cupones/lista', function (req, res) {
+  const lote = String(req.query.lote || '').trim().toUpperCase();
+  const soloLibres = String(req.query.libres || '') === '1';
+  const base = (BASE_URL || '').toUpperCase().replace('HTTPS://', 'https://');
+
+  const codigos = Object.keys(cupones)
+    .filter(function (c) { return !lote || cupones[c].lote === lote; })
+    .filter(function (c) { return !soloLibres || !cupones[c].usado; })
+    .sort();
+
+  if (codigos.length === 0) {
+    return res.type('text/plain').send('No hay cupones para ese lote.');
+  }
+  res.type('text/plain').send(codigos.map(function (c) {
+    return base + '/C/' + c;
+  }).join('\n'));
 });
 
 app.get('/log', function (req, res) {
@@ -776,6 +1301,40 @@ app.get('/admin', function (req, res) {
 '</div></div>' +
 
 '<div class="seccion">' +
+'<h2 class="titulo">Cupones</h2>' +
+(function () {
+  const s = statsCupones();
+  if (s.total === 0) {
+    return '<div class="datos">Todavía no hay cupones cargados.<br>' +
+      'Se crean desde <b>/cupones/generar</b></div>';
+  }
+  return '<div class="reparto"><span>Sin usar</span><b>' + s.disponibles + ' de ' + s.total + '</b></div>' +
+    '<div class="reparto"><span>Canjeados hoy</span><b>' + s.canjesHoy + '</b></div>' +
+    '<div class="reparto"><span>Terminaron comprando</span><b>' + s.convertidos + ' (' + s.conversion + '%)</b></div>';
+})() +
+'<div class="botones" style="margin-top:12px">' +
+'<a class="b" href="/cupones">Ver detalle</a>' +
+'<a class="b" href="/cupones/lista">Links para imprimir</a>' +
+'</div></div>' +
+
+'<div class="seccion">' +
+'<h2 class="titulo">Prendida y apagada</h2>' +
+(function () {
+  const ult = encendidos.slice(-8).reverse();
+  if (ult.length === 0) return '<div class="datos">Todavía sin registros.</div>';
+  let f = '<div class="datos">';
+  ult.forEach(function (e) {
+    const d = new Date(e.ts);
+    const cuando = d.toLocaleString('es-AR', {
+      timeZone: 'America/Argentina/Buenos_Aires', hour12: false,
+      day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+    });
+    f += cuando + ' · <b>' + (e.tipo === 'apagada' ? 'se apagó' : 'volvió') + '</b><br>';
+  });
+  return f + '</div>';
+})() + '</div>' +
+
+'<div class="seccion">' +
 '<h2 class="titulo">Máquina</h2>' +
 '<div class="datos">' +
 'Última señal · <b>' + (segDesdePoll < 0 ? 'nunca' : 'hace ' + segDesdePoll + ' s') + '</b><br>' +
@@ -948,6 +1507,7 @@ app.post('/webhook', function (req, res) {
       if (fichas > 0) {
         if (agregarFichas(fichas, 'pago $' + monto)) {
           registrarVenta(monto, fichas, 'qr', idStr);
+          marcarConversion();
         }
       } else {
         log('SIN COMBO', 'pago $' + monto + ' no coincide con ningun combo');
@@ -963,8 +1523,10 @@ app.post('/webhook', function (req, res) {
 });
 
 app.listen(process.env.PORT || 3000, '0.0.0.0', async function () {
-  log('ARRANQUE', 'Server v6. BASE_URL=' + (BASE_URL || 'FALTA') +
+  log('ARRANQUE', 'Server v10. BASE_URL=' + (BASE_URL || 'FALTA') +
       ' | persistencia=' + (persistenciaOk ? 'SI' : 'NO') +
+      ' | eventos recuperados=' + eventosRecuperados +
+      ' | ventas guardadas=' + ventas.length +
       ' | avisos=' + (NTFY_TOPIC ? 'SI' : 'NO'));
   if (!MP_TOKEN) log('ALERTA', 'FALTA MP_ACCESS_TOKEN');
   if (!BASE_URL) log('ALERTA', 'FALTA RAILWAY_PUBLIC_DOMAIN');
