@@ -102,15 +102,62 @@ function leerJSON(archivo, porDefecto) {
   }
 }
 
-let encendidos = [];
+// Cada vez que el QR se cae queda una ficha con cuando empezo, cuando volvio
+// y por que. El motivo se deduce solo: si el Shelly aviso que arranco, es que
+// apagaron y prendieron la maquina; si volvio a responder sin avisar, fue el wifi.
+let caidas = [];
 
-function anotarEncendido(tipo, detalle) {
-  encendidos.push({ ts: Date.now(), tipo: tipo, detalle: detalle || '' });
-  const limite = Date.now() - 60 * 24 * 60 * 60 * 1000;
-  encendidos = encendidos.filter(function (e) { return e.ts > limite; });
-  if (persistenciaOk) {
-    try { fs.writeFileSync(F_ENCENDIDOS, JSON.stringify(encendidos)); } catch (e) {}
+function guardarCaidas() {
+  if (!persistenciaOk) return;
+  try { fs.writeFileSync(F_ENCENDIDOS, JSON.stringify(caidas)); } catch (e) {}
+}
+
+function abrirCaida(desde) {
+  caidas.push({ inicio: desde, fin: null, motivo: null, enHorario: enHorarioDeBar() });
+  const limite = Date.now() - 90 * 24 * 60 * 60 * 1000;
+  caidas = caidas.filter(function (c) { return c.inicio > limite; });
+  guardarCaidas();
+}
+
+function cerrarCaida() {
+  for (let i = caidas.length - 1; i >= 0; i--) {
+    if (caidas[i].fin === null) {
+      caidas[i].fin = Date.now();
+      // Si hubo un aviso de arranque despues de que empezo la caida,
+      // la maquina se apago de verdad. Si no, fue la conexion.
+      caidas[i].motivo = (ultimoArranqueShelly > caidas[i].inicio) ? 'apagada' : 'wifi';
+      guardarCaidas();
+      return caidas[i];
+    }
   }
+  return null;
+}
+
+function minutosDe(c) {
+  const fin = c.fin || Date.now();
+  return Math.max(0, Math.round((fin - c.inicio) / 60000));
+}
+
+// Tiempo muerto: cuanto estuvo el QR sin poder cobrar, y por que.
+function statsCaidas(desdeMs) {
+  const lista = caidas.filter(function (c) { return (c.fin || Date.now()) >= desdeMs; });
+  let minutos = 0, porWifi = 0, porApagada = 0, minWifi = 0, minApagada = 0;
+  let enPico = 0, minPico = 0;
+  lista.forEach(function (c) {
+    const m = minutosDe(c);
+    minutos += m;
+    if (c.motivo === 'apagada') { porApagada++; minApagada += m; }
+    else { porWifi++; minWifi += m; }
+    if (c.enHorario) { enPico++; minPico += m; }
+  });
+  return {
+    cantidad: lista.length, minutos: minutos,
+    porWifi: porWifi, minWifi: minWifi,
+    porApagada: porApagada, minApagada: minApagada,
+    enHorarioDeBar: enPico, minutosEnHorario: minPico,
+    lista: lista,
+    abierta: caidas.length && caidas[caidas.length-1].fin === null ? caidas[caidas.length-1] : null
+  };
 }
 
 let guardadoPendiente = false;
@@ -143,7 +190,7 @@ let ventas = leerJSON(F_VENTAS, []);
 let ultimoGratis = 0;
 let ultimoPoll = 0;
 let pagosProcesados = leerJSON(F_PAGOS, {});
-encendidos = leerJSON(F_ENCENDIDOS, []);
+caidas = leerJSON(F_ENCENDIDOS, []);
 let cantidadProcesados = Object.keys(pagosProcesados).length;
 let ultimoArranqueShelly = 0;
 let desconexionesHoy = 0;
@@ -510,7 +557,7 @@ async function vigilarShelly() {
     // Si el bar esta cerrado, que la maquina este apagada es lo esperable.
     // Se registra en el log pero no suena el telefono: un aviso que llega
     // todas las noches deja de significar algo.
-    anotarEncendido('apagada', 'silencio de ' + silencioMin + ' min');
+    abrirCaida(ultimoPoll || (Date.now() - silencioMs));
     if (!enHorarioDeBar()) {
       alertaShellyActiva = true;
       log('MAQUINA APAGADA', 'dejo de responder (bar cerrado, no se avisa al celular)');
@@ -534,7 +581,7 @@ async function vigilarShelly() {
   if (!caido && alertaShellyActiva) {
     alertaShellyActiva = false;
     avisoOlvidoEnviado = false;
-    anotarEncendido('prendida', '');
+    const cerrada = cerrarCaida();
     if (enHorarioDeBar()) {
       avisar('BPK - Maquina OK', 'El Shelly volvio y el QR esta activo de nuevo.', false);
     } else {
@@ -726,7 +773,10 @@ app.get('/estado', function (req, res) {
 
 const F_CUPONES = path.join(DATA_DIR, 'cupones.json');
 const F_CANJES = path.join(DATA_DIR, 'canjes.json');
-const VENTANA_CONVERSION_MS = 15 * 60 * 1000;  // margen para contar si compro despues
+// Dos ventanas: 5 minutos es "compro en caliente, justo despues de tirar";
+// 15 minutos es "se quedo dando vueltas y despues compro".
+const CONV_CORTA_MS = 5 * 60 * 1000;
+const CONV_LARGA_MS = 15 * 60 * 1000;
 const FICHAS_POR_CUPON = 1;
 
 let cupones = leerJSON(F_CUPONES, {});   // { CODIGO: {lote, usado: ts|null} }
@@ -774,37 +824,69 @@ function statsCupones(lote) {
   const usados = codigos.filter(function (c) { return cupones[c].usado; });
   const desde = inicioJornada();
   const hoy = canjes.filter(function (x) { return x.ts >= desde; });
-  const convertidos = canjes.filter(function (x) { return x.convertido; });
+
+  const c5 = canjes.filter(function (x) { return x.conv5; });
+  const c15 = canjes.filter(function (x) { return x.conv15; });
+  const recaudado = c15.reduce(function (a, x) { return a + (x.montoConv || 0); }, 0);
+
+  // A que hora se canjean y a que hora convierten. Sirve para saber en que
+  // franja conviene repartirlos.
+  const porHora = {};
+  canjes.forEach(function (x) {
+    const h = Number(new Date(x.ts).toLocaleString('en-US', {
+      timeZone: 'America/Argentina/Buenos_Aires', hour: '2-digit', hour12: false }));
+    if (!porHora[h]) porHora[h] = { canjes: 0, conv: 0 };
+    porHora[h].canjes++;
+    if (x.conv15) porHora[h].conv++;
+  });
+
+  let mejorHora = null;
+  Object.keys(porHora).forEach(function (h) {
+    if (porHora[h].canjes < 2) return;   // con un solo canje no se concluye nada
+    const tasa = porHora[h].conv / porHora[h].canjes;
+    if (mejorHora === null || tasa > mejorHora.tasa) {
+      mejorHora = { hora: Number(h), tasa: tasa, canjes: porHora[h].canjes, conv: porHora[h].conv };
+    }
+  });
+
   return {
     total: codigos.length,
     usados: usados.length,
     disponibles: codigos.length - usados.length,
     canjesHoy: hoy.length,
     canjesTotal: canjes.length,
-    convertidos: convertidos.length,
-    conversion: canjes.length ? Math.round(convertidos.length * 100 / canjes.length) : 0
+    conv5: c5.length,
+    conv15: c15.length,
+    tasa5: canjes.length ? Math.round(c5.length * 100 / canjes.length) : 0,
+    tasa15: canjes.length ? Math.round(c15.length * 100 / canjes.length) : 0,
+    recaudado: recaudado,
+    porTiro: c15.length ? Math.round(recaudado / c15.length) : 0,
+    ingresoPorCupon: canjes.length ? Math.round(recaudado / canjes.length) : 0,
+    porHora: porHora,
+    mejorHora: mejorHora,
+    // compatibilidad con lo que ya usaba el panel
+    convertidos: c15.length,
+    conversion: canjes.length ? Math.round(c15.length * 100 / canjes.length) : 0
   };
 }
 
-// Cuando entra un pago, si hubo un canje hace poco lo contamos como que el
-// cupon funciono: el tipo probo gratis y despues compro. Es la unica forma
-// de saber si vale la pena seguir imprimiendo cupones.
-function marcarConversion() {
-  const limite = Date.now() - VENTANA_CONVERSION_MS;
+function marcarConversion(monto) {
+  const ahora = Date.now();
   for (let i = canjes.length - 1; i >= 0; i--) {
-    if (canjes[i].ts < limite) break;
-    if (!canjes[i].convertido) {
-      canjes[i].convertido = true;
-      log('CUPON CONVIRTIO', 'un canje de hace ' + Math.round((Date.now() - canjes[i].ts) / 60000) + ' min termino en compra');
-      guardarCupones();
-      return;
-    }
+    const c = canjes[i];
+    const pasado = ahora - c.ts;
+    if (pasado > CONV_LARGA_MS) break;      // mas viejo que la ventana grande
+    if (c.conv15) continue;                  // ese canje ya fue contado
+    c.conv15 = true;
+    if (pasado <= CONV_CORTA_MS) c.conv5 = true;
+    c.montoConv = monto || 0;
+    log('CUPON CONVIRTIO', 'canje de hace ' + Math.round(pasado / 60000) +
+        ' min termino en compra de $' + (monto || 0));
+    guardarCupones();
+    return;
   }
 }
 
-// Las paginas que ve el cliente cuando escanea. Siguen la estetica del cupon
-// impreso: gris carbon, el amarillo del circulo B, el rojo del puno, las barras
-// diagonales y la tipografia condensada en italica con contorno.
 function paginaCupon(opciones) {
   const o = opciones || {};
   const acento = o.acento || '#F5B301';
@@ -919,10 +1001,11 @@ function paginaEscaneo(req, res) {
 
   if (!shellyVivo() || bloqueado) {
     return res.type('text/html').send(paginaCupon({
-      titulo: 'Esperá<br><em>un toque</em>',
-      cuerpo: '<p>La máquina no está entregando tiros en este momento.</p>' +
-        '<div class="marco"><b>No te gastamos el cupón.</b><br>Guardalo y probá en un rato.</div>' +
-        '<p class="chico">Avisale al mozo así la revisan.</p>',
+      titulo: 'El QR<br><em>está caído</em>',
+      cuerpo: '<div class="marco"><b>Tu cupón no se gastó.</b><br>Guardalo y probá en un rato.</div>' +
+        '<p style="margin-top:22px">Mientras tanto <b>pagá en efectivo</b>:<br>' +
+        'metele billetes directo a la máquina y jugá igual.</p>' +
+        '<p class="chico">Cualquier cosa, avisale al mozo.</p>',
       acento: '#F5B301' }));
   }
 
@@ -983,8 +1066,9 @@ function activarCupon(req, res) {
 
   if (!shellyVivo() || bloqueado) {
     return res.type('text/html').send(paginaCupon({
-      titulo: 'Esperá<br><em>un toque</em>',
-      cuerpo: '<div class="marco"><b>No te gastamos el cupón.</b><br>Guardalo y probá en un rato.</div>',
+      titulo: 'El QR<br><em>está caído</em>',
+      cuerpo: '<div class="marco"><b>Tu cupón no se gastó.</b><br>Guardalo y probá en un rato.</div>' +
+        '<p style="margin-top:22px"><b>Pagá en efectivo</b> en la máquina y jugá igual.</p>',
       acento: '#F5B301' }));
   }
 
@@ -1008,7 +1092,7 @@ function activarCupon(req, res) {
       acento: '#F5B301' }));
   }
 
-  canjes.push({ ts: Date.now(), codigo: cod, lote: cup.lote, convertido: false });
+  canjes.push({ ts: Date.now(), codigo: cod, lote: cup.lote, conv5: false, conv15: false, montoConv: 0 });
   const limite = Date.now() - 90 * 24 * 60 * 60 * 1000;
   canjes = canjes.filter(function (x) { return x.ts > limite; });
   guardarCupones();
@@ -1513,34 +1597,65 @@ app.get('/admin', function (req, res) {
 '<div class="seccion">' +
 '<h2 class="titulo">Cupones</h2>' +
 (function () {
-  const s = statsCupones();
-  if (s.total === 0) {
+  const s2 = statsCupones();
+  if (s2.total === 0) {
     return '<div class="datos">Todavía no hay cupones cargados.</div>' +
       '<div class="botones" style="margin-top:12px">' +
       '<a class="b ancho" href="/cupones">Cargar o crear cupones</a></div>';
   }
-  return '<div class="reparto"><span>Sin usar</span><b>' + s.disponibles + ' de ' + s.total + '</b></div>' +
-    '<div class="reparto"><span>Canjeados hoy</span><b>' + s.canjesHoy + '</b></div>' +
-    '<div class="reparto"><span>Compró después de canjear</span><b>' + s.convertidos + ' de ' + s.canjesTotal + ' (' + s.conversion + '%)</b></div>' +
-    '<div class="botones" style="margin-top:12px">' +
+  let f = '<div class="reparto"><span>Sin usar</span><b>' + s2.disponibles + ' de ' + s2.total + '</b></div>' +
+    '<div class="reparto"><span>Canjeados hoy</span><b>' + s2.canjesHoy + '</b></div>' +
+    '<div class="reparto"><span>Compró en 5 min</span><b>' + s2.conv5 + ' · ' + s2.tasa5 + '%</b></div>' +
+    '<div class="reparto"><span>Compró en 15 min</span><b>' + s2.conv15 + ' · ' + s2.tasa15 + '%</b></div>' +
+    '<div class="reparto"><span>Plata que trajeron</span><b>$' + s2.recaudado.toLocaleString('es-AR') + '</b></div>' +
+    '<div class="reparto"><span>Por cupón repartido</span><b>$' + s2.ingresoPorCupon.toLocaleString('es-AR') + '</b></div>';
+  if (s2.mejorHora) {
+    f += '<div class="reparto"><span>Mejor hora</span><b>' + s2.mejorHora.hora + ':00 · ' +
+      Math.round(s2.mejorHora.tasa * 100) + '%</b></div>';
+  }
+  f += '<div class="botones" style="margin-top:12px">' +
     '<a class="b ancho" href="/cupones">Administrar cupones</a></div>';
+  return f;
 })() + '</div>' +
 
 '<div class="seccion">' +
-'<h2 class="titulo">Prendida y apagada</h2>' +
+'<h2 class="titulo">Tiempo muerto</h2>' +
 (function () {
-  const ult = encendidos.slice(-8).reverse();
-  if (ult.length === 0) return '<div class="datos">Todavía sin registros.</div>';
-  let f = '<div class="datos">';
-  ult.forEach(function (e) {
-    const d = new Date(e.ts);
-    const cuando = d.toLocaleString('es-AR', {
-      timeZone: 'America/Argentina/Buenos_Aires', hour12: false,
-      day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
-    });
-    f += cuando + ' · <b>' + (e.tipo === 'apagada' ? 'se apagó' : 'volvió') + '</b><br>';
+  const dia = 24 * 60 * 60 * 1000;
+  const sem = statsCaidas(Date.now() - 7 * dia);
+  const hoy = statsCaidas(inicioJornada());
+
+  if (sem.cantidad === 0 && !sem.abierta) {
+    return '<div class="datos">Sin caídas en los últimos 7 días.</div>';
+  }
+
+  const fmt = function (m) {
+    if (m < 60) return m + ' min';
+    return Math.floor(m / 60) + ' h ' + (m % 60) + ' min';
+  };
+
+  let f = '';
+  if (sem.abierta) {
+    f += '<div style="background:#4A1717;border:1px solid #6E2222;border-radius:8px;' +
+      'padding:11px 13px;margin-bottom:12px;font-size:14px;color:#FFC9C4">' +
+      '<b>Caído ahora</b> — hace ' + fmt(minutosDe(sem.abierta)) + '</div>';
+  }
+  f += '<div class="reparto"><span>Hoy</span><b>' + fmt(hoy.minutos) + ' en ' + hoy.cantidad + (hoy.cantidad === 1 ? ' caída' : ' caídas') + '</b></div>';
+  f += '<div class="reparto"><span>Últimos 7 días</span><b>' + fmt(sem.minutos) + ' en ' + sem.cantidad + '</b></div>';
+  f += '<div class="reparto"><span>Con el bar abierto</span><b>' + fmt(sem.minutosEnHorario) + ' (' + sem.enHorarioDeBar + ')</b></div>';
+  f += '<div class="reparto"><span>Por WiFi</span><b>' + sem.porWifi + ' · ' + fmt(sem.minWifi) + '</b></div>';
+  f += '<div class="reparto"><span>Por apagado</span><b>' + sem.porApagada + ' · ' + fmt(sem.minApagada) + '</b></div>';
+
+  f += '<div class="datos" style="margin-top:14px">';
+  sem.lista.slice(-6).reverse().forEach(function (c) {
+    const d = new Date(c.inicio);
+    const cuando = d.toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires',
+      hour12: false, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const motivo = c.fin === null ? 'sigue caído' : (c.motivo === 'apagada' ? 'la apagaron' : 'se cortó el WiFi');
+    f += cuando + ' · <b>' + fmt(minutosDe(c)) + '</b> · ' + motivo + '<br>';
   });
-  return f + '</div>';
+  f += '</div>';
+  return f;
 })() + '</div>' +
 
 '<div class="seccion">' +
@@ -1585,10 +1700,12 @@ app.get('/panel', function (req, res) {
     detalle = 'Alguien apretó PAUSA o saltó el corte automático.<br>Motivo: ' + motivoBloqueo +
       '<br><br><b>El billetero sigue funcionando.</b><br>Tocá REANUDAR abajo para volver a la normalidad.';
   } else if (!vivo) {
-    const minCaido = segDesdePoll < 0 ? '?' : Math.round(segDesdePoll / 60);
+    const minCaido = segDesdePoll < 0
+      ? 'La máquina no está dando señal.'
+      : 'La máquina no da señal hace ' + Math.round(segDesdePoll / 60) + ' min.';
     color = '#c0392b'; titulo = 'QR CAÍDO';
-    detalle = 'La máquina no habla con el servidor hace ' + minCaido + ' min.<br><br>' +
-      '<b>SÍ funciona:</b> el billetero. Que paguen con monedas o billetes directo en la máquina.<br>' +
+    detalle = minCaido + '<br><br>' +
+      '<b>COBRAR EN EFECTIVO:</b> que metan billetes directo en la máquina. Funciona igual.<br>' +
       '<b>NO funciona:</b> el QR. Lo corté a propósito para que nadie pague algo que la máquina no le va a dar.<br><br>' +
       '<b>TAPAR EL CARTEL DEL QR.</b>';
     diagnostico =
@@ -1604,8 +1721,9 @@ app.get('/panel', function (req, res) {
   } else if (qrCortado || mpFallando) {
     color = '#e67e22'; titulo = 'QR SIN SERVICIO';
     detalle = 'La máquina anda bien, pero el QR no funciona.<br><br>' +
-      '<b>Que paguen por el billetero</b> con monedas o billetes.<br>' +
-      'El combo de 3 tiros ($5.500) no se puede vender mientras el QR esté caído.<br><br>' +
+      '<b>COBRAR EN EFECTIVO:</b> que metan billetes directo en la máquina.<br>' +
+      'Toma $2.000, $10.000 y $20.000. El combo de 3 tiros ($5.500) no se puede ' +
+      'vender mientras el QR esté caído.<br><br>' +
       'Tapar el cartel del QR y avisar a Fausto.';
   } else {
     color = '#1e8449'; titulo = 'TODO OK';
@@ -1716,7 +1834,7 @@ app.post('/webhook', function (req, res) {
       if (fichas > 0) {
         if (agregarFichas(fichas, 'pago $' + monto)) {
           registrarVenta(monto, fichas, 'qr', idStr);
-          marcarConversion();
+          marcarConversion(monto);
         }
       } else {
         log('SIN COMBO', 'pago $' + monto + ' no coincide con ningun combo');
