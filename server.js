@@ -6,9 +6,19 @@ const path = require('path');
 const app = express();
 
 app.use(express.json({
+  limit: '3mb',   // las fotos de las pinas viajan en el cuerpo; el default de 100kb las rebotaba
   verify: function (req, res, buf) { req.rawBody = buf.toString('utf8'); }
 }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '3mb' }));
+
+// Si la foto viene muy grande, que el celular reciba un JSON que entiende
+// y no el HTML de error de Express.
+app.use(function (err, req, res, next) {
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'la foto es muy pesada' });
+  }
+  next(err);
+});
 
 // ============================================================
 //  BPK / BeerPunch - servidor de creditos
@@ -193,6 +203,27 @@ let pagosProcesados = leerJSON(F_PAGOS, {});
 caidas = leerJSON(F_ENCENDIDOS, []);
 let cantidadProcesados = Object.keys(pagosProcesados).length;
 let ultimoArranqueShelly = 0;
+// Que red wifi esta usando el Shelly y con cuanta señal. El script se lo
+// manda en cada consulta; solo lo anotamos en el log cuando CAMBIA, para
+// no ensuciar. Sirve para saber si se paso a la red de respaldo y si la
+// señal se cae antes de que se corte.
+let redShelly = '';
+let señalShelly = '';
+let redDesde = 0;
+
+function anotarRed(req) {
+  const ssid = String(req.query.ssid || '').slice(0, 32);
+  const rssi = String(req.query.rssi || '').slice(0, 6);
+  if (!ssid) return;
+  if (rssi) señalShelly = rssi;
+  if (ssid !== redShelly) {
+    log('RED WIFI', 'el Shelly esta en "' + ssid + '"' +
+        (rssi ? ' (señal ' + rssi + ' dBm)' : '') +
+        (redShelly ? ' — antes estaba en "' + redShelly + '"' : ''));
+    redShelly = ssid;
+    redDesde = Date.now();
+  }
+}
 let desconexionesHoy = 0;
 const arranque = Date.now();
 
@@ -532,9 +563,21 @@ function shellyVivo() {
   return (Date.now() - ultimoPoll) < SHELLY_CAIDO_MS;
 }
 
+let jornadaDelAviso = 0;
+
 async function vigilarShelly() {
   // Al arrancar el servidor damos margen antes de juzgar nada.
   if (!ultimoPoll && (Date.now() - arranque) < SHELLY_CAIDO_MS) return;
+
+  // El aviso de "sigue apagada" se marcaba como enviado y no se limpiaba
+  // hasta que la maquina volviera. Si se caia a las 2 AM y seguia caida al
+  // dia siguiente, al abrir el bar NO avisaba nada. Ahora se limpia solo al
+  // empezar cada jornada.
+  const jornadaHoy = inicioJornada();
+  if (jornadaDelAviso !== jornadaHoy) {
+    jornadaDelAviso = jornadaHoy;
+    avisoOlvidoEnviado = false;
+  }
 
   const silencioMs = ultimoPoll ? (Date.now() - ultimoPoll) : (Date.now() - arranque);
   const silencioMin = Math.round(silencioMs / 60000);
@@ -590,16 +633,35 @@ async function vigilarShelly() {
   }
 
   // El bar ya abrio hace rato y la maquina sigue muerta. Nadie se dio cuenta.
-  if (caido && yaDeberiaEstarPrendida() && !avisoOlvidoEnviado) {
+  // En la ultima media hora antes de cerrar, que la maquina se apague es lo
+  // normal: si avisamos igual, el telefono suena todas las noches y el aviso
+  // deja de significar algo.
+  const t2 = ahoraArg();
+  const enElCierre = t2.minutos < minutoDeCierre() && (minutoDeCierre() - t2.minutos) <= 30;
+
+  if (caido && yaDeberiaEstarPrendida() && !avisoOlvidoEnviado && !enElCierre) {
     avisoOlvidoEnviado = true;
-    log('MAQUINA APAGADA', 'el bar ya abrio y la maquina sigue sin dar senal');
-    avisar(
-      'BPK - La maquina sigue apagada',
-      'Ya es horario de bar y la maquina no da senal hace ' + silencioMin + ' min.\n' +
-      'Puede ser que se olvidaron de prenderla.\n\n' +
-      'Mientras siga asi no entra plata por QR.',
-      true
-    );
+    // No es lo mismo "nunca la prendieron" que "venia andando y se corto".
+    const anduvoHoy = ultimoPoll && ultimoPoll >= inicioJornada();
+    if (anduvoHoy) {
+      log('MAQUINA MUDA', 'venia andando en esta jornada y se corto hace ' + silencioMin + ' min');
+      avisar(
+        'BPK - Se corto la maquina',
+        'La maquina venia andando y dejo de responder hace ' + silencioMin + ' min.\n' +
+        'NO es que se olvidaron de prenderla: se cayo la conexion o la apagaron.\n\n' +
+        'EL BILLETERO SIGUE ANDANDO: que cobren ahi mientras tanto.',
+        true
+      );
+    } else {
+      log('MAQUINA APAGADA', 'el bar ya abrio y la maquina no dio senal en toda la jornada');
+      avisar(
+        'BPK - La maquina sigue apagada',
+        'Ya es horario de bar y la maquina no dio senal en toda la jornada.\n' +
+        'Lo mas probable: se olvidaron de prenderla.\n\n' +
+        'Mientras siga asi no entra plata por QR.',
+        true
+      );
+    }
   }
 }
 
@@ -750,6 +812,10 @@ app.get('/estado', function (req, res) {
     'QR de Mercado Pago = ' + (qrCortado ? 'CORTADO (Shelly caido)' : (mpFallando ? 'FALLANDO (MP no crea ordenes)' : 'activo')) + '\n' +
     'fichas ultimos ' + VENTANA_MIN + ' min = ' + ultimas + ' (tope ' + MAX_FICHAS_VENTANA + ')\n' +
     'ultimo poll del Shelly = ' + (segDesdePoll < 0 ? 'nunca' : 'hace ' + segDesdePoll + ' s') + '\n' +
+    'red wifi del Shelly = ' + (redShelly
+        ? (redShelly + (señalShelly ? ' (señal ' + señalShelly + ' dBm)' : '') +
+           (redDesde ? ' desde hace ' + Math.round((Date.now() - redDesde) / 60000) + ' min' : ''))
+        : 'no informada (script viejo)') + '\n' +
     'ultimo arranque del Shelly = ' + (ultimoArranqueShelly ? new Date(ultimoArranqueShelly).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) : 'sin avisos desde que arranco el server') + '\n' +
     'desconexiones desde el arranque = ' + desconexionesHoy + '\n' +
     'base_url = ' + (BASE_URL || '*** FALTA RAILWAY_PUBLIC_DOMAIN ***') + '\n' +
@@ -1343,6 +1409,7 @@ app.get('/probar-aviso', function (req, res) {
 // ===== ENTREGA CON CONFIRMACION =====
 app.get('/shelly-poll', function (req, res) {
   ultimoPoll = Date.now();
+  anotarRed(req);
   if (bloqueado) { res.type('text/plain').send('0'); return; }
 
   if (entregaEnVuelo) {
@@ -1383,6 +1450,7 @@ app.get('/shelly-ack', function (req, res) {
 app.get('/shelly-hello', function (req, res) {
   ultimoArranqueShelly = Date.now();
   ultimoPoll = Date.now();
+  anotarRed(req);
   log('SHELLY ARRANCO', 'el Shelly acaba de encenderse (corte de luz o reinicio)');
   res.type('text/plain').send('ok');
 });
@@ -1848,6 +1916,27 @@ app.post('/webhook', function (req, res) {
       log('ERROR MP', 'consultando pago ' + idStr + ': ' + e.message);
     });
 });
+
+// ===== MODULO DE PINAS =====
+// Va aca: despues de que todo lo de arriba esta definido, antes de escuchar.
+// Si este modulo falla, el cobro sigue funcionando igual.
+try {
+  const montarPinas = require('./pinas');
+  montarPinas(app, {
+    DATA_DIR: DATA_DIR,
+    persistenciaOk: persistenciaOk,
+    log: log,
+    rutina: rutina,
+    claveOk: claveOk,
+    enHorarioDeBar: enHorarioDeBar,
+    inicioJornada: inicioJornada,
+    agregarFichas: agregarFichas,
+    avisar: avisar,
+    BASE_URL: BASE_URL
+  });
+} catch (e) {
+  log('PINAS', 'no se pudo montar el modulo: ' + e.message + ' (el cobro sigue andando)');
+}
 
 app.listen(process.env.PORT || 3000, '0.0.0.0', async function () {
   log('ARRANQUE', 'Server v10. BASE_URL=' + (BASE_URL || 'FALTA') +
