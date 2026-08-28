@@ -87,7 +87,17 @@ module.exports = function montarPinas(app, ctx) {
   const F_PINAS   = path.join(DATA_DIR, 'pinas.json');
   const F_PREMIOS = path.join(DATA_DIR, 'premios.json');
   const DIR_FOTOS = path.join(DATA_DIR, 'fotos');
-  const DIR_WEB   = path.join(__dirname, 'publico');
+  // Los HTML pueden estar en publico/ o al lado de este archivo. Probamos
+  // los dos, asi no importa como quedaron subidos al repo.
+  const DIRS_WEB = [path.join(__dirname, 'publico'), __dirname];
+
+  function buscarWeb(nombre) {
+    for (let i = 0; i < DIRS_WEB.length; i++) {
+      const f = path.join(DIRS_WEB[i], nombre);
+      try { if (fs.existsSync(f)) return f; } catch (e) {}
+    }
+    return null;
+  }
 
   // ===== PERSISTENCIA (mismo criterio que el server: si no hay volumen, no mentimos) =====
   function leer(archivo, porDefecto) {
@@ -534,13 +544,20 @@ module.exports = function montarPinas(app, ctx) {
   // Los HTML viven en la carpeta publico/ del repo.
   function servir(nombre) {
     return function (req, res) {
-      const f = path.join(DIR_WEB, nombre);
-      if (!fs.existsSync(f)) return res.status(404).send('falta publico/' + nombre);
+      const f = buscarWeb(nombre);
+      if (!f) return res.status(404).send('falta el archivo ' + nombre +
+        ' (lo busque en publico/ y en la raiz del repo)');
       res.sendFile(f);
     };
   }
   app.get('/m',     servir('carga.html'));   // el QR de la máquina apunta acá
   app.get('/totem', servir('totem.html'));   // lo que abre el TV Box
+
+  const faltan = ['carga.html', 'totem.html'].filter(function (n) { return !buscarWeb(n); });
+  if (faltan.length) {
+    log('PIÑAS', 'OJO: faltan las paginas ' + faltan.join(' y ') +
+        '. El ranking funciona pero /m y /totem van a dar 404.');
+  }
 
   log('PIÑAS', 'módulo montado · ' + pinas.length + ' piñas y ' + premios.length + ' premios en memoria' +
       (persistenciaOk ? '' : ' · SIN VOLUMEN: no se van a guardar'));
