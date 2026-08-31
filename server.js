@@ -203,23 +203,23 @@ let pagosProcesados = leerJSON(F_PAGOS, {});
 caidas = leerJSON(F_ENCENDIDOS, []);
 let cantidadProcesados = Object.keys(pagosProcesados).length;
 let ultimoArranqueShelly = 0;
-// Que red wifi esta usando el Shelly y con cuanta señal. El script se lo
+// Que red wifi esta usando el Shelly y con cuanta seÃ±al. El script se lo
 // manda en cada consulta; solo lo anotamos en el log cuando CAMBIA, para
 // no ensuciar. Sirve para saber si se paso a la red de respaldo y si la
-// señal se cae antes de que se corte.
+// seÃ±al se cae antes de que se corte.
 let redShelly = '';
-let señalShelly = '';
+let seÃ±alShelly = '';
 let redDesde = 0;
 
 function anotarRed(req) {
   const ssid = String(req.query.ssid || '').slice(0, 32);
   const rssi = String(req.query.rssi || '').slice(0, 6);
   if (!ssid) return;
-  if (rssi) señalShelly = rssi;
+  if (rssi) seÃ±alShelly = rssi;
   if (ssid !== redShelly) {
     log('RED WIFI', 'el Shelly esta en "' + ssid + '"' +
-        (rssi ? ' (señal ' + rssi + ' dBm)' : '') +
-        (redShelly ? ' — antes estaba en "' + redShelly + '"' : ''));
+        (rssi ? ' (seÃ±al ' + rssi + ' dBm)' : '') +
+        (redShelly ? ' â antes estaba en "' + redShelly + '"' : ''));
     redShelly = ssid;
     redDesde = Date.now();
   }
@@ -563,7 +563,17 @@ function shellyVivo() {
   return (Date.now() - ultimoPoll) < SHELLY_CAIDO_MS;
 }
 
-let jornadaDelAviso = 0;
+// OJO: inicioJornada() NO sirve para comparar jornadas. Devuelve un numero
+// distinto en cada llamada, porque el desfase se calcula contra un Date que
+// perdio los milisegundos. Comparandolo, el aviso se reseteaba cada 30 s y
+// el telefono sonaba sin parar. Aca usamos una clave estable por dia.
+function claveJornada() {
+  const arg = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+  if (arg.getHours() < 12) arg.setDate(arg.getDate() - 1);
+  return arg.getFullYear() + '-' + (arg.getMonth() + 1) + '-' + arg.getDate();
+}
+
+let jornadaDelAviso = '';
 
 async function vigilarShelly() {
   // Al arrancar el servidor damos margen antes de juzgar nada.
@@ -573,7 +583,7 @@ async function vigilarShelly() {
   // hasta que la maquina volviera. Si se caia a las 2 AM y seguia caida al
   // dia siguiente, al abrir el bar NO avisaba nada. Ahora se limpia solo al
   // empezar cada jornada.
-  const jornadaHoy = inicioJornada();
+  const jornadaHoy = claveJornada();
   if (jornadaDelAviso !== jornadaHoy) {
     jornadaDelAviso = jornadaHoy;
     avisoOlvidoEnviado = false;
@@ -813,7 +823,7 @@ app.get('/estado', function (req, res) {
     'fichas ultimos ' + VENTANA_MIN + ' min = ' + ultimas + ' (tope ' + MAX_FICHAS_VENTANA + ')\n' +
     'ultimo poll del Shelly = ' + (segDesdePoll < 0 ? 'nunca' : 'hace ' + segDesdePoll + ' s') + '\n' +
     'red wifi del Shelly = ' + (redShelly
-        ? (redShelly + (señalShelly ? ' (señal ' + señalShelly + ' dBm)' : '') +
+        ? (redShelly + (seÃ±alShelly ? ' (seÃ±al ' + seÃ±alShelly + ' dBm)' : '') +
            (redDesde ? ' desde hace ' + Math.round((Date.now() - redDesde) / 60000) + ' min' : ''))
         : 'no informada (script viejo)') + '\n' +
     'ultimo arranque del Shelly = ' + (ultimoArranqueShelly ? new Date(ultimoArranqueShelly).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) : 'sin avisos desde que arranco el server') + '\n' +
@@ -1040,8 +1050,8 @@ function paginaEscaneo(req, res) {
 
   if (!cup) {
     return res.type('text/html').send(paginaCupon({
-      titulo: 'Este cupón<br><em>no anda</em>',
-      cuerpo: '<p>El código no figura en el sistema.</p>' +
+      titulo: 'Este cupÃ³n<br><em>no anda</em>',
+      cuerpo: '<p>El cÃ³digo no figura en el sistema.</p>' +
         '<p class="chico">Puede haber quedado mal escaneado.<br>Pedile otro al mozo.</p>',
       acento: '#E23B36' }));
   }
@@ -1051,9 +1061,9 @@ function paginaEscaneo(req, res) {
       timeZone: 'America/Argentina/Buenos_Aires', hour12: false,
       day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     return res.type('text/html').send(paginaCupon({
-      titulo: 'Este ya<br><em>se usó</em>',
-      cuerpo: '<p>Se activó el ' + cuando + '.</p>' +
-        '<p class="chico">Cada cupón sirve una sola vez.<br>Pedile otro al mozo y probá de nuevo.</p>',
+      titulo: 'Este ya<br><em>se usÃ³</em>',
+      cuerpo: '<p>Se activÃ³ el ' + cuando + '.</p>' +
+        '<p class="chico">Cada cupÃ³n sirve una sola vez.<br>Pedile otro al mozo y probÃ¡ de nuevo.</p>',
       acento: '#E23B36' }));
   }
 
@@ -1061,16 +1071,16 @@ function paginaEscaneo(req, res) {
     return res.type('text/html').send(paginaCupon({
       titulo: 'Ahora<br><em>no</em>',
       cuerpo: '<p>Los tiros se activan con el bar abierto.</p>' +
-        '<div class="marco"><b>Tu cupón sigue intacto.</b><br>Volvé cuando abramos y usalo.</div>',
+        '<div class="marco"><b>Tu cupÃ³n sigue intacto.</b><br>VolvÃ© cuando abramos y usalo.</div>',
       acento: '#F5B301' }));
   }
 
   if (!shellyVivo() || bloqueado) {
     return res.type('text/html').send(paginaCupon({
-      titulo: 'El QR<br><em>está caído</em>',
-      cuerpo: '<div class="marco"><b>Tu cupón no se gastó.</b><br>Guardalo y probá en un rato.</div>' +
-        '<p style="margin-top:22px">Mientras tanto <b>pagá en efectivo</b>:<br>' +
-        'metele billetes directo a la máquina y jugá igual.</p>' +
+      titulo: 'El QR<br><em>estÃ¡ caÃ­do</em>',
+      cuerpo: '<div class="marco"><b>Tu cupÃ³n no se gastÃ³.</b><br>Guardalo y probÃ¡ en un rato.</div>' +
+        '<p style="margin-top:22px">Mientras tanto <b>pagÃ¡ en efectivo</b>:<br>' +
+        'metele billetes directo a la mÃ¡quina y jugÃ¡ igual.</p>' +
         '<p class="chico">Cualquier cosa, avisale al mozo.</p>',
       acento: '#F5B301' }));
   }
@@ -1082,8 +1092,8 @@ function paginaEscaneo(req, res) {
   // links no ejecutan JavaScript, asi que no pueden quemar el cupon.
   const boton =
     '<button id="b" onclick="activar()"><span>Activar mi tiro</span></button>' +
-    '<p class="chico">Tocalo solo cuando estés parado en la máquina.<br>' +
-    'El tiro sale enseguida y no se guarda para después.</p>' +
+    '<p class="chico">Tocalo solo cuando estÃ©s parado en la mÃ¡quina.<br>' +
+    'El tiro sale enseguida y no se guarda para despuÃ©s.</p>' +
     '<script>' +
     'function activar(){' +
     'var b=document.getElementById("b");b.disabled=true;b.innerHTML="<span>Activando...</span>";' +
@@ -1094,9 +1104,9 @@ function paginaEscaneo(req, res) {
     '}</script>';
 
   res.type('text/html').send(paginaCupon({
-    titulo: '¿Te<br>animás?',
+    titulo: 'Â¿Te<br>animÃ¡s?',
     bloque: '1 tiro gratis',
-    cuerpo: '<p>Pegale a la máquina y mirá cuánto marcás.</p>',
+    cuerpo: '<p>Pegale a la mÃ¡quina y mirÃ¡ cuÃ¡nto marcÃ¡s.</p>',
     boton: boton,
     acento: '#E23B36' }));
 }
@@ -1111,30 +1121,30 @@ function activarCupon(req, res) {
 
   if (!cup) {
     return res.type('text/html').send(paginaCupon({
-      titulo: 'Este cupón<br><em>no anda</em>',
-      cuerpo: '<p class="chico">El código no figura en el sistema.</p>',
+      titulo: 'Este cupÃ³n<br><em>no anda</em>',
+      cuerpo: '<p class="chico">El cÃ³digo no figura en el sistema.</p>',
       acento: '#E23B36' }));
   }
 
   if (cup.usado) {
     return res.type('text/html').send(paginaCupon({
-      titulo: 'Este ya<br><em>se usó</em>',
-      cuerpo: '<p class="chico">Cada cupón sirve una sola vez.</p>',
+      titulo: 'Este ya<br><em>se usÃ³</em>',
+      cuerpo: '<p class="chico">Cada cupÃ³n sirve una sola vez.</p>',
       acento: '#E23B36' }));
   }
 
   if (!enHorarioDeBar()) {
     return res.type('text/html').send(paginaCupon({
       titulo: 'Ahora<br><em>no</em>',
-      cuerpo: '<div class="marco"><b>Tu cupón sigue intacto.</b><br>Volvé con el bar abierto.</div>',
+      cuerpo: '<div class="marco"><b>Tu cupÃ³n sigue intacto.</b><br>VolvÃ© con el bar abierto.</div>',
       acento: '#F5B301' }));
   }
 
   if (!shellyVivo() || bloqueado) {
     return res.type('text/html').send(paginaCupon({
-      titulo: 'El QR<br><em>está caído</em>',
-      cuerpo: '<div class="marco"><b>Tu cupón no se gastó.</b><br>Guardalo y probá en un rato.</div>' +
-        '<p style="margin-top:22px"><b>Pagá en efectivo</b> en la máquina y jugá igual.</p>',
+      titulo: 'El QR<br><em>estÃ¡ caÃ­do</em>',
+      cuerpo: '<div class="marco"><b>Tu cupÃ³n no se gastÃ³.</b><br>Guardalo y probÃ¡ en un rato.</div>' +
+        '<p style="margin-top:22px"><b>PagÃ¡ en efectivo</b> en la mÃ¡quina y jugÃ¡ igual.</p>',
       acento: '#F5B301' }));
   }
 
@@ -1152,8 +1162,8 @@ function activarCupon(req, res) {
     guardarCupones();
     log('CUPON DEVUELTO', cod + ' no se pudo entregar, vuelve a estar disponible');
     return res.type('text/html').send(paginaCupon({
-      titulo: 'Se nos<br><em>trabó</em>',
-      cuerpo: '<div class="marco"><b>Tu cupón sigue sirviendo.</b><br>Probá de nuevo en un minuto.</div>' +
+      titulo: 'Se nos<br><em>trabÃ³</em>',
+      cuerpo: '<div class="marco"><b>Tu cupÃ³n sigue sirviendo.</b><br>ProbÃ¡ de nuevo en un minuto.</div>' +
         '<p class="chico">Si sigue igual, avisale al mozo.</p>',
       acento: '#F5B301' }));
   }
@@ -1165,9 +1175,9 @@ function activarCupon(req, res) {
   log('CUPON', cod + ' (lote ' + cup.lote + ') canjeado');
 
   res.type('text/html').send(paginaCupon({
-    titulo: '¡Dale<br>que va!',
+    titulo: 'Â¡Dale<br>que va!',
     bloque: 'tiro cargado',
-    cuerpo: '<p>Ya está en la máquina.<br>Pegale con todo.</p>' +
+    cuerpo: '<p>Ya estÃ¡ en la mÃ¡quina.<br>Pegale con todo.</p>' +
       '<p class="chico">Si no sale en unos segundos, avisale al mozo.</p>',
     acento: '#F5B301' }));
 }
@@ -1208,9 +1218,9 @@ app.get('/cupones', function (req, res) {
   });
 
   if (bloquesLote === '') {
-    bloquesLote = '<div class="vacio">Todavía no hay cupones cargados.<br>' +
-      'Si ya los mandaste a imprimir, pegá los códigos acá abajo.<br>' +
-      'Si todavía no, creá un lote nuevo y después mandalo a imprimir.</div>';
+    bloquesLote = '<div class="vacio">TodavÃ­a no hay cupones cargados.<br>' +
+      'Si ya los mandaste a imprimir, pegÃ¡ los cÃ³digos acÃ¡ abajo.<br>' +
+      'Si todavÃ­a no, creÃ¡ un lote nuevo y despuÃ©s mandalo a imprimir.</div>';
   }
 
   const html = '<!DOCTYPE html><html lang="es"><head>' +
@@ -1267,7 +1277,7 @@ app.get('/cupones', function (req, res) {
 '<div class="trio">' +
 '<div><b>' + s.canjesHoy + '</b><span>hoy</span></div>' +
 '<div><b>' + s.usados + '</b><span>usados</span></div>' +
-'<div><b>' + s.conversion + '%</b><span>compró después</span></div>' +
+'<div><b>' + s.conversion + '%</b><span>comprÃ³ despuÃ©s</span></div>' +
 '</div></div>' +
 
 '<div class="seccion">' +
@@ -1275,20 +1285,20 @@ app.get('/cupones', function (req, res) {
 
 '<div class="seccion">' +
 '<h2 class="titulo">Cargar cupones ya impresos</h2>' +
-'<p class="ayuda">Si mandaste a imprimir los cupones antes de cargarlos acá, el servidor no los conoce ' +
-'y va a decir "cupón no válido". Pegá los códigos para que los reconozca. ' +
-'Separados por coma, espacio o uno por línea.</p>' +
+'<p class="ayuda">Si mandaste a imprimir los cupones antes de cargarlos acÃ¡, el servidor no los conoce ' +
+'y va a decir "cupÃ³n no vÃ¡lido". PegÃ¡ los cÃ³digos para que los reconozca. ' +
+'Separados por coma, espacio o uno por lÃ­nea.</p>' +
 '<label>Nombre del lote</label>' +
 '<input id="loteImp" value="L2" autocapitalize="characters">' +
-'<label>Códigos</label>' +
+'<label>CÃ³digos</label>' +
 '<textarea id="codigos" placeholder="G5D5B, HSV97, DUV0F..." autocapitalize="characters"></textarea>' +
-'<button class="principal" onclick="importar()">Cargar estos códigos</button>' +
+'<button class="principal" onclick="importar()">Cargar estos cÃ³digos</button>' +
 '<div class="aviso" id="avImp"></div></div>' +
 
 '<div class="seccion">' +
 '<h2 class="titulo">Crear un lote nuevo</h2>' +
-'<p class="ayuda">Genera códigos nuevos acá y después los mandás a imprimir. ' +
-'Es el camino más seguro: nacen conocidos por el servidor.</p>' +
+'<p class="ayuda">Genera cÃ³digos nuevos acÃ¡ y despuÃ©s los mandÃ¡s a imprimir. ' +
+'Es el camino mÃ¡s seguro: nacen conocidos por el servidor.</p>' +
 '<div class="fila2">' +
 '<div><label>Lote</label><input id="loteGen" placeholder="L3" autocapitalize="characters"></div>' +
 '<div><label>Cantidad</label><input id="cant" type="number" inputmode="numeric" placeholder="72"></div>' +
@@ -1302,20 +1312,20 @@ app.get('/cupones', function (req, res) {
 'function importar(){' +
 'var lote=document.getElementById("loteImp").value.trim();' +
 'var cods=document.getElementById("codigos").value.trim();' +
-'if(!lote){mostrar("avImp","Poné un nombre de lote.",false);return;}' +
-'if(!cods){mostrar("avImp","Pegá los códigos primero.",false);return;}' +
+'if(!lote){mostrar("avImp","PonÃ© un nombre de lote.",false);return;}' +
+'if(!cods){mostrar("avImp","PegÃ¡ los cÃ³digos primero.",false);return;}' +
 'var b=event.target;b.disabled=true;b.textContent="Cargando...";' +
 'fetch("/cupones/importar?lote="+encodeURIComponent(lote)+"&clave="+CLAVE+"&codigos="+encodeURIComponent(cods))' +
 '.then(function(r){return r.text()}).then(function(t){' +
 'mostrar("avImp",t,t.indexOf("Cargados")>=0);' +
-'b.disabled=false;b.textContent="Cargar estos códigos";' +
+'b.disabled=false;b.textContent="Cargar estos cÃ³digos";' +
 'if(t.indexOf("Cargados")>=0){setTimeout(function(){location.reload()},1800);}' +
-'}).catch(function(){mostrar("avImp","No se pudo conectar. Probá de nuevo.",false);' +
-'b.disabled=false;b.textContent="Cargar estos códigos";});}' +
+'}).catch(function(){mostrar("avImp","No se pudo conectar. ProbÃ¡ de nuevo.",false);' +
+'b.disabled=false;b.textContent="Cargar estos cÃ³digos";});}' +
 'function generar(){' +
 'var lote=document.getElementById("loteGen").value.trim();' +
 'var cant=document.getElementById("cant").value.trim();' +
-'if(!lote||!cant){mostrar("avGen","Completá el lote y la cantidad.",false);return;}' +
+'if(!lote||!cant){mostrar("avGen","CompletÃ¡ el lote y la cantidad.",false);return;}' +
 'var b=event.target;b.disabled=true;b.textContent="Creando...";' +
 'fetch("/cupones/generar?lote="+encodeURIComponent(lote)+"&cantidad="+encodeURIComponent(cant)+"&clave="+CLAVE)' +
 '.then(function(r){return r.text()}).then(function(t){' +
@@ -1532,10 +1542,10 @@ app.get('/admin', function (req, res) {
   const cAmp = CLAVE ? ('&clave=' + encodeURIComponent(CLAVE)) : '';
 
   let estadoColor, estadoTexto;
-  if (bloqueado) { estadoColor = 'rojo'; estadoTexto = 'FRENADO — ' + motivoBloqueo; }
-  else if (!vivo) { estadoColor = 'rojo'; estadoTexto = 'MAQUINA DESCONECTADA — QR cortado'; }
-  else if (qrCortado || mpFallando) { estadoColor = 'ambar'; estadoTexto = 'QR SIN SERVICIO — solo billetero'; }
-  else { estadoColor = 'verde'; estadoTexto = 'EN LINEA — vista hace ' + segDesdePoll + ' s'; }
+  if (bloqueado) { estadoColor = 'rojo'; estadoTexto = 'FRENADO â ' + motivoBloqueo; }
+  else if (!vivo) { estadoColor = 'rojo'; estadoTexto = 'MAQUINA DESCONECTADA â QR cortado'; }
+  else if (qrCortado || mpFallando) { estadoColor = 'ambar'; estadoTexto = 'QR SIN SERVICIO â solo billetero'; }
+  else { estadoColor = 'verde'; estadoTexto = 'EN LINEA â vista hace ' + segDesdePoll + ' s'; }
 
   const maxHist = Math.max.apply(null, historial.map(function (h) { return h.total; }).concat([1]));
 
@@ -1547,7 +1557,7 @@ app.get('/admin', function (req, res) {
       '<div class="hist-fila">' +
       '<span class="hist-dia">' + (i === 0 ? 'hoy' : d.toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit' })) + '</span>' +
       '<span class="hist-barra"><i style="width:' + ancho + '%"></i></span>' +
-      '<span class="hist-monto">' + (h.total ? '$' + h.total.toLocaleString('es-AR') : '—') + '</span>' +
+      '<span class="hist-monto">' + (h.total ? '$' + h.total.toLocaleString('es-AR') : 'â') + '</span>' +
       '</div>';
   });
 
@@ -1621,7 +1631,7 @@ app.get('/admin', function (req, res) {
 
 '<div class="tope">' +
 '<h1 class="marca">Beer<em>punch</em></h1>' +
-'<div class="sub">Beerlin · Arístides Villanueva 129</div>' +
+'<div class="sub">Beerlin Â· ArÃ­stides Villanueva 129</div>' +
 '</div>' +
 
 '<div class="tira ' + estadoColor + '"><i></i>' + estadoTexto + '</div>' +
@@ -1629,7 +1639,7 @@ app.get('/admin', function (req, res) {
   '<div style="background:#4A1717;border-bottom:1px solid #6E2222;padding:14px 18px;font-size:14px;line-height:1.6;color:#FFC9C4">' +
   '<b>Falta el volumen en Railway.</b><br>' +
   'Los cupones, el historial y la caja se borran cada vez que el servidor se reinicia.<br>' +
-  'Railway → proyecto → + New → Volume → montarlo en <b>/data</b>' +
+  'Railway â proyecto â + New â Volume â montarlo en <b>/data</b>' +
   '</div>') +
 
 '<div class="tablero">' +
@@ -1642,10 +1652,10 @@ app.get('/admin', function (req, res) {
 '</div></div>' +
 
 '<div class="seccion">' +
-'<h2 class="titulo">Últimas 7 jornadas</h2>' + filasHist + '</div>' +
+'<h2 class="titulo">Ãltimas 7 jornadas</h2>' + filasHist + '</div>' +
 
 '<div class="seccion">' +
-'<h2 class="titulo">Qué se vendió hoy</h2>' +
+'<h2 class="titulo">QuÃ© se vendiÃ³ hoy</h2>' +
 '<div class="combos">' + filasCombo + '</div>' +
 '<div style="margin-top:14px">' +
 '<div class="reparto"><span>Le toca al bar (' + PORCENTAJE_BAR + '%)</span><b>$' + r.paraBar.toLocaleString('es-AR') + '</b></div>' +
@@ -1667,18 +1677,18 @@ app.get('/admin', function (req, res) {
 (function () {
   const s2 = statsCupones();
   if (s2.total === 0) {
-    return '<div class="datos">Todavía no hay cupones cargados.</div>' +
+    return '<div class="datos">TodavÃ­a no hay cupones cargados.</div>' +
       '<div class="botones" style="margin-top:12px">' +
       '<a class="b ancho" href="/cupones">Cargar o crear cupones</a></div>';
   }
   let f = '<div class="reparto"><span>Sin usar</span><b>' + s2.disponibles + ' de ' + s2.total + '</b></div>' +
     '<div class="reparto"><span>Canjeados hoy</span><b>' + s2.canjesHoy + '</b></div>' +
-    '<div class="reparto"><span>Compró en 5 min</span><b>' + s2.conv5 + ' · ' + s2.tasa5 + '%</b></div>' +
-    '<div class="reparto"><span>Compró en 15 min</span><b>' + s2.conv15 + ' · ' + s2.tasa15 + '%</b></div>' +
+    '<div class="reparto"><span>ComprÃ³ en 5 min</span><b>' + s2.conv5 + ' Â· ' + s2.tasa5 + '%</b></div>' +
+    '<div class="reparto"><span>ComprÃ³ en 15 min</span><b>' + s2.conv15 + ' Â· ' + s2.tasa15 + '%</b></div>' +
     '<div class="reparto"><span>Plata que trajeron</span><b>$' + s2.recaudado.toLocaleString('es-AR') + '</b></div>' +
-    '<div class="reparto"><span>Por cupón repartido</span><b>$' + s2.ingresoPorCupon.toLocaleString('es-AR') + '</b></div>';
+    '<div class="reparto"><span>Por cupÃ³n repartido</span><b>$' + s2.ingresoPorCupon.toLocaleString('es-AR') + '</b></div>';
   if (s2.mejorHora) {
-    f += '<div class="reparto"><span>Mejor hora</span><b>' + s2.mejorHora.hora + ':00 · ' +
+    f += '<div class="reparto"><span>Mejor hora</span><b>' + s2.mejorHora.hora + ':00 Â· ' +
       Math.round(s2.mejorHora.tasa * 100) + '%</b></div>';
   }
   f += '<div class="botones" style="margin-top:12px">' +
@@ -1694,7 +1704,7 @@ app.get('/admin', function (req, res) {
   const hoy = statsCaidas(inicioJornada());
 
   if (sem.cantidad === 0 && !sem.abierta) {
-    return '<div class="datos">Sin caídas en los últimos 7 días.</div>';
+    return '<div class="datos">Sin caÃ­das en los Ãºltimos 7 dÃ­as.</div>';
   }
 
   const fmt = function (m) {
@@ -1706,42 +1716,42 @@ app.get('/admin', function (req, res) {
   if (sem.abierta) {
     f += '<div style="background:#4A1717;border:1px solid #6E2222;border-radius:8px;' +
       'padding:11px 13px;margin-bottom:12px;font-size:14px;color:#FFC9C4">' +
-      '<b>Caído ahora</b> — hace ' + fmt(minutosDe(sem.abierta)) + '</div>';
+      '<b>CaÃ­do ahora</b> â hace ' + fmt(minutosDe(sem.abierta)) + '</div>';
   }
-  f += '<div class="reparto"><span>Hoy</span><b>' + fmt(hoy.minutos) + ' en ' + hoy.cantidad + (hoy.cantidad === 1 ? ' caída' : ' caídas') + '</b></div>';
-  f += '<div class="reparto"><span>Últimos 7 días</span><b>' + fmt(sem.minutos) + ' en ' + sem.cantidad + '</b></div>';
+  f += '<div class="reparto"><span>Hoy</span><b>' + fmt(hoy.minutos) + ' en ' + hoy.cantidad + (hoy.cantidad === 1 ? ' caÃ­da' : ' caÃ­das') + '</b></div>';
+  f += '<div class="reparto"><span>Ãltimos 7 dÃ­as</span><b>' + fmt(sem.minutos) + ' en ' + sem.cantidad + '</b></div>';
   f += '<div class="reparto"><span>Con el bar abierto</span><b>' + fmt(sem.minutosEnHorario) + ' (' + sem.enHorarioDeBar + ')</b></div>';
-  f += '<div class="reparto"><span>Por WiFi</span><b>' + sem.porWifi + ' · ' + fmt(sem.minWifi) + '</b></div>';
-  f += '<div class="reparto"><span>Por apagado</span><b>' + sem.porApagada + ' · ' + fmt(sem.minApagada) + '</b></div>';
+  f += '<div class="reparto"><span>Por WiFi</span><b>' + sem.porWifi + ' Â· ' + fmt(sem.minWifi) + '</b></div>';
+  f += '<div class="reparto"><span>Por apagado</span><b>' + sem.porApagada + ' Â· ' + fmt(sem.minApagada) + '</b></div>';
 
   f += '<div class="datos" style="margin-top:14px">';
   sem.lista.slice(-6).reverse().forEach(function (c) {
     const d = new Date(c.inicio);
     const cuando = d.toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires',
       hour12: false, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-    const motivo = c.fin === null ? 'sigue caído' : (c.motivo === 'apagada' ? 'la apagaron' : 'se cortó el WiFi');
-    f += cuando + ' · <b>' + fmt(minutosDe(c)) + '</b> · ' + motivo + '<br>';
+    const motivo = c.fin === null ? 'sigue caÃ­do' : (c.motivo === 'apagada' ? 'la apagaron' : 'se cortÃ³ el WiFi');
+    f += cuando + ' Â· <b>' + fmt(minutosDe(c)) + '</b> Â· ' + motivo + '<br>';
   });
   f += '</div>';
   return f;
 })() + '</div>' +
 
 '<div class="seccion">' +
-'<h2 class="titulo">Máquina</h2>' +
+'<h2 class="titulo">MÃ¡quina</h2>' +
 '<div class="datos">' +
-'Última señal · <b>' + (segDesdePoll < 0 ? 'nunca' : 'hace ' + segDesdePoll + ' s') + '</b><br>' +
-'Encendida desde · <b>' + (ultimoArranqueShelly ? new Date(ultimoArranqueShelly).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) : 'sin dato') + '</b><br>' +
-'Se desconectó · <b>' + desconexionesHoy + ' ' + (desconexionesHoy === 1 ? 'vez' : 'veces') + '</b><br>' +
-'Fichas en cola · <b>' + pendingActivation + '</b><br>' +
-'Sin confirmar · <b>' + (entregaEnVuelo ? entregaEnVuelo.n : 0) + '</b><br>' +
-'QR de Mercado Pago · <b>' + (qrCortado ? 'cortado' : 'activo') + '</b><br>' +
-'Avisos al celular · <b>' + (NTFY_TOPIC ? 'sí' : 'NO CONFIGURADOS') + '</b><br>' +
-'Memoria del log · <b>' + (persistenciaOk ? 'guardada en el volumen' : 'NO SE GUARDA') + '</b><br>' +
-'Servidor desde · <b>' + new Date(arranque).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) + '</b>' +
+'Ãltima seÃ±al Â· <b>' + (segDesdePoll < 0 ? 'nunca' : 'hace ' + segDesdePoll + ' s') + '</b><br>' +
+'Encendida desde Â· <b>' + (ultimoArranqueShelly ? new Date(ultimoArranqueShelly).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) : 'sin dato') + '</b><br>' +
+'Se desconectÃ³ Â· <b>' + desconexionesHoy + ' ' + (desconexionesHoy === 1 ? 'vez' : 'veces') + '</b><br>' +
+'Fichas en cola Â· <b>' + pendingActivation + '</b><br>' +
+'Sin confirmar Â· <b>' + (entregaEnVuelo ? entregaEnVuelo.n : 0) + '</b><br>' +
+'QR de Mercado Pago Â· <b>' + (qrCortado ? 'cortado' : 'activo') + '</b><br>' +
+'Avisos al celular Â· <b>' + (NTFY_TOPIC ? 'sÃ­' : 'NO CONFIGURADOS') + '</b><br>' +
+'Memoria del log Â· <b>' + (persistenciaOk ? 'guardada en el volumen' : 'NO SE GUARDA') + '</b><br>' +
+'Servidor desde Â· <b>' + new Date(arranque).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) + '</b>' +
 '</div></div>' +
 
 '<div class="seccion">' +
-'<h2 class="titulo">Ver más</h2>' +
+'<h2 class="titulo">Ver mÃ¡s</h2>' +
 '<div class="botones">' +
 '<a class="b" href="/log">Historial</a>' +
 '<a class="b" href="/caja">Caja detallada</a>' +
@@ -1765,37 +1775,37 @@ app.get('/panel', function (req, res) {
   let color, titulo, detalle, diagnostico = '';
   if (bloqueado) {
     color = '#c0392b'; titulo = 'SISTEMA FRENADO';
-    detalle = 'Alguien apretó PAUSA o saltó el corte automático.<br>Motivo: ' + motivoBloqueo +
-      '<br><br><b>El billetero sigue funcionando.</b><br>Tocá REANUDAR abajo para volver a la normalidad.';
+    detalle = 'Alguien apretÃ³ PAUSA o saltÃ³ el corte automÃ¡tico.<br>Motivo: ' + motivoBloqueo +
+      '<br><br><b>El billetero sigue funcionando.</b><br>TocÃ¡ REANUDAR abajo para volver a la normalidad.';
   } else if (!vivo) {
     const minCaido = segDesdePoll < 0
-      ? 'La máquina no está dando señal.'
-      : 'La máquina no da señal hace ' + Math.round(segDesdePoll / 60) + ' min.';
-    color = '#c0392b'; titulo = 'QR CAÍDO';
+      ? 'La mÃ¡quina no estÃ¡ dando seÃ±al.'
+      : 'La mÃ¡quina no da seÃ±al hace ' + Math.round(segDesdePoll / 60) + ' min.';
+    color = '#c0392b'; titulo = 'QR CAÃDO';
     detalle = minCaido + '<br><br>' +
-      '<b>COBRAR EN EFECTIVO:</b> que metan billetes directo en la máquina. Funciona igual.<br>' +
-      '<b>NO funciona:</b> el QR. Lo corté a propósito para que nadie pague algo que la máquina no le va a dar.<br><br>' +
+      '<b>COBRAR EN EFECTIVO:</b> que metan billetes directo en la mÃ¡quina. Funciona igual.<br>' +
+      '<b>NO funciona:</b> el QR. Lo cortÃ© a propÃ³sito para que nadie pague algo que la mÃ¡quina no le va a dar.<br><br>' +
       '<b>TAPAR EL CARTEL DEL QR.</b>';
     diagnostico =
-      '<div class="box"><h2>Cómo arreglarlo</h2>' +
+      '<div class="box"><h2>CÃ³mo arreglarlo</h2>' +
       '<p style="font-size:15px;line-height:1.7;margin:0 0 10px">' +
-      '<b>1.</b> Abrí la app de Shelly y mirá el dispositivo.<br><br>' +
-      '<b>Si dice "no hay conexión"</b> → es el WiFi o la corriente.<br>' +
-      'Cortá la luz de la máquina 10 segundos y prendela. Si sigue igual, revisá si el WiFi del bar anda.<br><br>' +
-      '<b>Si aparece conectado (online)</b> → se colgó el script.<br>' +
-      'Entrá a Scripts, tocá Stop y después Start.<br><br>' +
-      '<b>2.</b> Cuando vuelva, el QR se reactiva solo y las fichas en cola caen en la máquina.' +
+      '<b>1.</b> AbrÃ­ la app de Shelly y mirÃ¡ el dispositivo.<br><br>' +
+      '<b>Si dice "no hay conexiÃ³n"</b> â es el WiFi o la corriente.<br>' +
+      'CortÃ¡ la luz de la mÃ¡quina 10 segundos y prendela. Si sigue igual, revisÃ¡ si el WiFi del bar anda.<br><br>' +
+      '<b>Si aparece conectado (online)</b> â se colgÃ³ el script.<br>' +
+      'EntrÃ¡ a Scripts, tocÃ¡ Stop y despuÃ©s Start.<br><br>' +
+      '<b>2.</b> Cuando vuelva, el QR se reactiva solo y las fichas en cola caen en la mÃ¡quina.' +
       '</p></div>';
   } else if (qrCortado || mpFallando) {
     color = '#e67e22'; titulo = 'QR SIN SERVICIO';
-    detalle = 'La máquina anda bien, pero el QR no funciona.<br><br>' +
-      '<b>COBRAR EN EFECTIVO:</b> que metan billetes directo en la máquina.<br>' +
+    detalle = 'La mÃ¡quina anda bien, pero el QR no funciona.<br><br>' +
+      '<b>COBRAR EN EFECTIVO:</b> que metan billetes directo en la mÃ¡quina.<br>' +
       'Toma $2.000, $10.000 y $20.000. El combo de 3 tiros ($5.500) no se puede ' +
-      'vender mientras el QR esté caído.<br><br>' +
+      'vender mientras el QR estÃ© caÃ­do.<br><br>' +
       'Tapar el cartel del QR y avisar a Fausto.';
   } else {
     color = '#1e8449'; titulo = 'TODO OK';
-    detalle = 'La máquina está conectada y el QR funciona.<br>Se puede jugar normal.';
+    detalle = 'La mÃ¡quina estÃ¡ conectada y el QR funciona.<br>Se puede jugar normal.';
   }
 
   const html = '<!DOCTYPE html><html lang="es"><head>' +
