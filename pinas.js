@@ -1,5 +1,5 @@
 // ============================================================
-// BPK / BeerPunch - modulo de PIÑAS
+// BPK / BeerPunch - modulo de PINAS
 // ------------------------------------------------------------
 // Se monta encima del server que ya cobra. No toca Mercado Pago,
 // no toca el Shelly, no toca las ordenes. Si este modulo falla,
@@ -35,29 +35,29 @@ module.exports = function montarPinas(app, ctx) {
   const avisar         = ctx.avisar || function () {};
 
   // ===== CONFIG =====
-  const APROBACION_MANUAL = false;   // true = la piña espera visto bueno antes de entrar al ranking
+  const APROBACION_MANUAL = false;   // true = la pina espera visto bueno antes de entrar al ranking
   const TOP               = 10;
   const MAX_FOTO_BYTES    = 900 * 1024;
   const DIAS_QUE_GUARDAMOS = 120;
   const MAX_PREMIOS_NOCHE  = 25;     // techo duro de premios por noche
-  const MAX_TIROS_PREMIO   = 2;      // ningún premio puede soltar más que esto
+  const MAX_TIROS_PREMIO   = 2;      // ningun premio puede soltar mas que esto
 
-  // ===== LA RULETA VIVE ACÁ, NO EN EL CELULAR =====
-  // El orden tiene que ser IDÉNTICO al del array GAJOS de publico/carga.html:
+  // ===== LA RULETA VIVE ACA, NO EN EL CELULAR =====
+  // El orden tiene que ser IDENTICO al del array GAJOS de publico/carga.html:
   // el server elige el gajo y el celular solo lo dibuja.
   const RULETA = [
     { t: '$100.000',              peso: 0.02,    premio: true },   // 1 cada 5.000
-    { t: 'SEGUÍ\nPARTICIPANDO',   peso: 16.0128 },
+    { t: 'SEGU\u00cd\nPARTICIPANDO',   peso: 16.0128 },
     { t: 'COMBO DE\nFERNET',      peso: 0.07,    premio: true },   // 1 cada 1.429
-    { t: 'SEGUÍ\nPARTICIPANDO',   peso: 16.0128 },
+    { t: 'SEGU\u00cd\nPARTICIPANDO',   peso: 16.0128 },
     { t: '2 BIRRITAS',            peso: 0.3333,  premio: true },   // 1 cada 300
-    { t: 'SEGUÍ\nPARTICIPANDO',   peso: 16.0128 },
-    { t: 'DEVOLUCIÓN\n$2.000',    peso: 0.5,     premio: true },   // 1 cada 200
-    { t: 'SEGUÍ\nPARTICIPANDO',   peso: 16.0128 },
+    { t: 'SEGU\u00cd\nPARTICIPANDO',   peso: 16.0128 },
+    { t: 'DEVOLUCI\u00d3N\n$2.000',    peso: 0.5,     premio: true },   // 1 cada 200
+    { t: 'SEGU\u00cd\nPARTICIPANDO',   peso: 16.0128 },
     { t: 'BIRRITA\nGRATIS',       peso: 1,       premio: true },   // 1 cada 100
-    { t: 'SEGUÍ\nPARTICIPANDO',   peso: 16.0128 },
+    { t: 'SEGU\u00cd\nPARTICIPANDO',   peso: 16.0128 },
     { t: 'TIRO\nGRATIS',          peso: 2,       premio: true },   // 1 cada 50
-    { t: 'SEGUÍ\nPARTICIPANDO',   peso: 16.0128 }
+    { t: 'SEGU\u00cd\nPARTICIPANDO',   peso: 16.0128 }
   ];
   const SEGUI_OTROS = [5, 7, 9, 11];
 
@@ -116,7 +116,7 @@ module.exports = function montarPinas(app, ctx) {
     catch (e) { rutina('PINAS', 'no se pudo crear la carpeta de fotos: ' + e.message); }
   }
 
-  // Escritura demorada: si entran 5 piñas seguidas no castigamos el disco 5 veces.
+  // Escritura demorada: si entran 5 pinas seguidas no castigamos el disco 5 veces.
   // Escritura segura: se escribe en un archivo temporal y recien cuando
   // esta completo se lo renombra encima del bueno. Renombrar es instantaneo,
   // asi que un corte a mitad de camino deja el archivo viejo entero en vez
@@ -142,7 +142,7 @@ module.exports = function montarPinas(app, ctx) {
   }
 
   // ===== HERRAMIENTAS =====
-  // "EL TANO", "el  tano" y "El Tanó" son la misma persona. Sin esto, el
+  // "EL TANO", "el  tano" y "El Tano" son la misma persona. Sin esto, el
   // mismo tipo puede ocupar tres lugares del top escribiendolo distinto.
   function clavePersona(apodo) {
     return String(apodo || '')
@@ -221,14 +221,14 @@ module.exports = function montarPinas(app, ctx) {
     req.on('close', function () { clientes.delete(res); });
   });
 
-  // Latido: mantiene viva la conexion con el tótem toda la noche.
+  // Latido: mantiene viva la conexion con el totem toda la noche.
   setInterval(function () { emitir('ping', { t: Date.now() }); }, 25000);
 
   app.get('/api/estado', function (req, res) { res.json(estado()); });
 
   // ===== FOTOS =====
   // Van a disco, no adentro del JSON: una foto en base64 dentro del archivo
-  // de piñas lo haria pesar megas y ralentizaria cada guardado.
+  // de pinas lo haria pesar megas y ralentizaria cada guardado.
   function guardarFoto(id, dataURL) {
     if (!persistenciaOk || !dataURL) return null;
     try {
@@ -246,11 +246,11 @@ module.exports = function montarPinas(app, ctx) {
     if (!claveOk(req)) return res.status(401).send('clave');
     const n = path.basename(String(req.params.archivo || ''));
     const f = path.join(DIR_FOTOS, n);
-    if (!fs.existsSync(f)) return res.status(404).send('no está');
+    if (!fs.existsSync(f)) return res.status(404).send('no est\u00e1');
     res.sendFile(f);
   });
 
-  // ===== CARGA DE UNA PIÑA (esto llama el celular del cliente) =====
+  // ===== CARGA DE UNA PINA (esto llama el celular del cliente) =====
   const ultimaCargaPorIP = {};
   // La libreta se vacia sola cada 10 min: antes crecia toda la noche.
   setInterval(function () {
@@ -273,12 +273,12 @@ module.exports = function montarPinas(app, ctx) {
     const ip = req.headers['x-forwarded-for'] || req.ip || '?';
     const ahora = Date.now();
     if (ultimaCargaPorIP[ip] && ahora - ultimaCargaPorIP[ip] < 4000) {
-      return res.status(429).json({ error: 'esperá unos segundos' });
+      return res.status(429).json({ error: 'esper\u00e1 unos segundos' });
     }
     ultimaCargaPorIP[ip] = ahora;
 
     // Si el celular reintenta porque se le corto la red a mitad de camino,
-    // devolvemos la misma respuesta en vez de cargar la piña dos veces.
+    // devolvemos la misma respuesta en vez de cargar la pina dos veces.
     const envio = limpiar(b.envio, 40);
     if (envio) {
       const repetida = pinas.find(function (p) { return p.envio === envio; });
@@ -294,7 +294,7 @@ module.exports = function montarPinas(app, ctx) {
       }
     }
 
-    // UN GIRO POR PERSONA POR NOCHE. Las piñas se cargan todas (el ranking
+    // UN GIRO POR PERSONA POR NOCHE. Las pinas se cargan todas (el ranking
     // las necesita); lo que se usa una sola vez es la ruleta.
     const yaGiro = pinas.some(function (p) {
       return p.giro && p.noche === nocheHoy() && clavePersona(p.apodo) === clavePersona(apodo);
@@ -328,11 +328,11 @@ module.exports = function montarPinas(app, ctx) {
     pinas = pinas.filter(function (p) { return p.ts > limite; });
 
     // ===== LA RULETA LA GIRA EL SERVIDOR =====
-    // El celular NO decide nada: manda su piña, el server sortea, y le
-    // devuelve en qué gajo tiene que frenar la rueda. Antes el celular
-    // mandaba el premio y cualquiera podía pedir "4 TIROS" con un POST.
+    // El celular NO decide nada: manda su pina, el server sortea, y le
+    // devuelve en que gajo tiene que frenar la rueda. Antes el celular
+    // mandaba el premio y cualquiera podia pedir "4 TIROS" con un POST.
     // gajo = -1 significa "no le toca girar". El celular ya sabe leerlo:
-    // muestra "PIÑA CARGADA / YA GIRASTE ESTA NOCHE" y no anima la rueda.
+    // muestra "PINA CARGADA / YA GIRASTE ESTA NOCHE" y no anima la rueda.
     let gajo = yaGiro ? -1 : girarServidor();
     let codigo = null;
     let nombrePremio = null;
@@ -344,8 +344,8 @@ module.exports = function montarPinas(app, ctx) {
       const premiosHoy = premios.filter(function (p) { return p.noche === nocheHoy(); }).length;
       if (premiosHoy >= MAX_PREMIOS_NOCHE) {
         log('PREMIO FRENADO', 'tope de ' + MAX_PREMIOS_NOCHE + ' premios en la noche');
-        avisar('BPK - Tope de premios', 'Se llegó a ' + MAX_PREMIOS_NOCHE +
-               ' premios en la noche. La ruleta deja de entregar hasta mañana.', true);
+        avisar('BPK - Tope de premios', 'Se lleg\u00f3 a ' + MAX_PREMIOS_NOCHE +
+               ' premios en la noche. La ruleta deja de entregar hasta ma\u00f1ana.', true);
         gajo = gajoPerdedor();
       }
     }
@@ -372,7 +372,7 @@ module.exports = function montarPinas(app, ctx) {
           entregadoTs: null,
           pina: id
         });
-        log('PREMIO', nombrePremio + ' para ' + apodo + ' · código ' + codigo);
+        log('PREMIO', nombrePremio + ' para ' + apodo + ' \u00b7 c\u00f3digo ' + codigo);
       }
     }
 
@@ -388,10 +388,10 @@ module.exports = function montarPinas(app, ctx) {
     });
     emitir('estado', nuevo);
 
-    log('PIÑA', apodo + ' ' + score + (esRecord ? ' RÉCORD' : '') + (puesto ? ' (#' + puesto + ')' : ''));
+    log('PI\u00d1A', apodo + ' ' + score + (esRecord ? ' R\u00c9CORD' : '') + (puesto ? ' (#' + puesto + ')' : ''));
 
     if (esRecord && previo > 0) {
-      avisar('BPK - Nuevo récord', apodo + ' hizo ' + score + ' puntos (antes ' + previo + ')', false);
+      avisar('BPK - Nuevo r\u00e9cord', apodo + ' hizo ' + score + ' puntos (antes ' + previo + ')', false);
     }
 
     res.json({ ok: true, gajo: gajo, premio: nombrePremio, codigo: codigo, puesto: puesto, esRecord: esRecord });
@@ -411,32 +411,32 @@ module.exports = function montarPinas(app, ctx) {
     });
   });
 
-  // Se busca por CÓDIGO, no por id: es lo que el cliente canta en la barra.
+  // Se busca por CODIGO, no por id: es lo que el cliente canta en la barra.
   app.post('/api/premios/entregar', function (req, res) {
     if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
     const cod = limpiar((req.body || {}).codigo, 8);
     const hoy = nocheHoy();
     const p = premios.find(function (x) { return x.codigo === cod && x.noche === hoy; });
 
-    if (!p)           return res.status(404).json({ error: 'ese código no existe en la noche de hoy' });
+    if (!p)           return res.status(404).json({ error: 'ese c\u00f3digo no existe en la noche de hoy' });
     if (p.entregado)  return res.status(409).json({ error: 'ya fue entregado', premio: p });
 
     p.entregado = true;
     p.entregadoTs = Date.now();
 
-    // Si el premio son tiros, se cargan solos en la máquina usando la
-    // misma cola que ya usa todo lo demás. La caja no toca nada más.
+    // Si el premio son tiros, se cargan solos en la maquina usando la
+    // misma cola que ya usa todo lo demas. La caja no toca nada mas.
     let fichasOk = null;
     const m = /(\d+)\s*TIRO/i.exec(p.premio);
     if (m) fichasOk = agregarFichas(Math.min(MAX_TIROS_PREMIO, Number(m[1]) || 1), 'premio ruleta ' + p.codigo);
     else if (/TIRO/i.test(p.premio)) fichasOk = agregarFichas(1, 'premio ruleta ' + p.codigo);
 
     guardar();
-    log('PREMIO ENTREGADO', p.premio + ' · código ' + p.codigo);
+    log('PREMIO ENTREGADO', p.premio + ' \u00b7 c\u00f3digo ' + p.codigo);
     res.json({ ok: true, premio: p, fichasOk: fichasOk });
   });
 
-  // ===== MODERACIÓN =====
+  // ===== MODERACION =====
   app.get('/api/pinas', function (req, res) {
     if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
     const hoy = nocheHoy();
@@ -451,7 +451,7 @@ module.exports = function montarPinas(app, ctx) {
     p.oculta = !p.oculta;
     guardar();
     emitir('estado', estado());
-    log('PIÑA', (p.oculta ? 'ocultada' : 'restaurada') + ': ' + p.apodo + ' ' + p.score);
+    log('PI\u00d1A', (p.oculta ? 'ocultada' : 'restaurada') + ': ' + p.apodo + ' ' + p.score);
     res.json({ ok: true, oculta: p.oculta });
   });
 
@@ -461,7 +461,7 @@ module.exports = function montarPinas(app, ctx) {
   const HTML_FOTOS = [
 '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">',
 '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">',
-'<meta name="color-scheme" content="dark"><title>BeerPunch · Piñas de la noche</title>',
+'<meta name="color-scheme" content="dark"><title>BeerPunch \u00b7 Pi\u00f1as de la noche</title>',
 '<style>',
 '*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}',
 'body{background:#0a0b10;color:#fff;font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;',
@@ -484,8 +484,8 @@ module.exports = function montarPinas(app, ctx) {
 '.vacio{text-align:center;color:#5b6270;padding:50px 0}',
 '.err{background:#3a1212;border:1px solid #7a2323;color:#ff9a9c;padding:14px;border-radius:10px;margin-top:18px}',
 '</style></head><body>',
-'<header><h1>BEER<span>PUNCH</span> · piñas de la noche</h1>',
-'<div class="sub" id="sub">cargando…</div></header>',
+'<header><h1>BEER<span>PUNCH</span> \u00b7 pi\u00f1as de la noche</h1>',
+'<div class="sub" id="sub">cargando\u2026</div></header>',
 '<div id="lista"></div>',
 '<script>',
 'var CLAVE=new URLSearchParams(location.search).get("clave")||"";',
@@ -493,8 +493,8 @@ module.exports = function montarPinas(app, ctx) {
 'function hora(ts){return new Date(ts).toLocaleTimeString("es-AR",{timeZone:"America/Argentina/Buenos_Aires",hour:"2-digit",minute:"2-digit",hour12:false});}',
 'function pintar(ps){',
 '  var L=document.getElementById("lista");L.innerHTML="";',
-'  document.getElementById("sub").textContent=ps.length+" piñas · tocá OCULTAR para sacarla del ranking";',
-'  if(!ps.length){L.innerHTML="<div class=\'vacio\'>Todavía no cargó nadie</div>";return;}',
+'  document.getElementById("sub").textContent=ps.length+" pi\u00f1as \u00b7 toc\u00e1 OCULTAR para sacarla del ranking";',
+'  if(!ps.length){L.innerHTML="<div class=\'vacio\'>Todav\u00eda no carg\u00f3 nadie</div>";return;}',
 '  ps.forEach(function(p){',
 '    var d=document.createElement("div");d.className="fila"+(p.oculta?" off":"");',
 '    var img;',
@@ -507,7 +507,7 @@ module.exports = function montarPinas(app, ctx) {
 '    dat.appendChild(n);',
 '    var sc=document.createElement("div");sc.className="sc";sc.textContent=p.score;dat.appendChild(sc);',
 '    var m=document.createElement("div");m.className="meta";',
-'    m.textContent=hora(p.ts)+(p.ig?" · "+p.ig:"")+(p.oculta?" · OCULTA":"");',
+'    m.textContent=hora(p.ts)+(p.ig?" \u00b7 "+p.ig:"")+(p.oculta?" \u00b7 OCULTA":"");',
 '    dat.appendChild(m);d.appendChild(dat);',
 '    var bt=document.createElement("button");bt.className="ac"+(p.oculta?" on":"");',
 '    bt.textContent=p.oculta?"MOSTRAR":"OCULTAR";',
@@ -527,7 +527,7 @@ module.exports = function montarPinas(app, ctx) {
 '    return r.json();',
 '  }).then(pintar).catch(function(e){',
 '    document.getElementById("lista").innerHTML=',
-'      "<div class=\'err\'>"+(e.message==="clave"?"Clave incorrecta. Abrí el link con ?clave=…":"No se pudo cargar. Revisá la conexión.")+"</div>";',
+'      "<div class=\'err\'>"+(e.message==="clave"?"Clave incorrecta. Abr\u00ed el link con ?clave=\u2026":"No se pudo cargar. Revis\u00e1 la conexi\u00f3n.")+"</div>";',
 '    document.getElementById("sub").textContent="";',
 '  });',
 '}',
@@ -540,7 +540,7 @@ module.exports = function montarPinas(app, ctx) {
     res.type('html').send(HTML_FOTOS);
   });
 
-  // ===== PÁGINAS =====
+  // ===== PAGINAS =====
   // Los HTML viven en la carpeta publico/ del repo.
   function servir(nombre) {
     return function (req, res) {
@@ -550,15 +550,15 @@ module.exports = function montarPinas(app, ctx) {
       res.sendFile(f);
     };
   }
-  app.get('/m',     servir('carga.html'));   // el QR de la máquina apunta acá
+  app.get('/m',     servir('carga.html'));   // el QR de la maquina apunta aca
   app.get('/totem', servir('totem.html'));   // lo que abre el TV Box
 
   const faltan = ['carga.html', 'totem.html'].filter(function (n) { return !buscarWeb(n); });
   if (faltan.length) {
-    log('PIÑAS', 'OJO: faltan las paginas ' + faltan.join(' y ') +
+    log('PI\u00d1AS', 'OJO: faltan las paginas ' + faltan.join(' y ') +
         '. El ranking funciona pero /m y /totem van a dar 404.');
   }
 
-  log('PIÑAS', 'módulo montado · ' + pinas.length + ' piñas y ' + premios.length + ' premios en memoria' +
-      (persistenciaOk ? '' : ' · SIN VOLUMEN: no se van a guardar'));
+  log('PI\u00d1AS', 'm\u00f3dulo montado \u00b7 ' + pinas.length + ' pi\u00f1as y ' + premios.length + ' premios en memoria' +
+      (persistenciaOk ? '' : ' \u00b7 SIN VOLUMEN: no se van a guardar'));
 };
