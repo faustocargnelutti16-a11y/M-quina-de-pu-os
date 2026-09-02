@@ -87,7 +87,7 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
 #cuenta b{color:var(--oro)}
 #cuenta.urge b{color:var(--led)}
 #filas{flex:1;display:flex;flex-direction:column;justify-content:space-evenly;min-height:0}
-.fil{display:flex;align-items:center;gap:3%;padding:.55% 3.5%;border-radius:9px;
+.fil{display:flex;align-items:center;gap:3%;padding:calc(.55% * var(--apr,1)) 3.5%;border-radius:9px;
   background:rgba(255,255,255,.04);box-shadow:inset 0 1px 0 rgba(255,255,255,.05);
   border:1px solid transparent}
 .fil.uno{border-color:rgba(255,213,24,.4)}
@@ -125,6 +125,31 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
 .card .arroba{font-family:var(--negra);font-size:2.7vh;line-height:1.1;color:#fff;
   letter-spacing:-.3px;white-space:nowrap;margin-top:.6vh}
 .card .arroba i{font-style:normal;color:var(--rojo)}
+/* Red de contencion: si el contenido de una card no entra en la altura de la
+   zona baja, se aprieta un escalon, y si sigue sin entrar, dos. Antes se
+   recortaba con overflow:hidden y el ultimo renglon quedaba pisado contra el
+   borde. Solo se activa cuando desborda: si entra, no cambia nada. */
+.card.ap1 .ceja{font-size:1.2vh;letter-spacing:2px;margin-bottom:.5vh}
+.card.ap1 h2{font-size:2.6vh}
+.card.ap1 .mega{font-size:4vh;margin-top:.35vh}
+.card.ap1 .big{font-size:2.35vh}
+.card.ap1 .arroba{font-size:2.35vh;margin-top:.35vh}
+.card.ap1 .txt{font-size:1.25vh;margin-top:.5vh}
+.card.ap1 .fila2{margin-top:.45vh;gap:.9vh}
+.card.ap2 .ceja{font-size:1.05vh;letter-spacing:1px;margin-bottom:.3vh}
+.card.ap2 h2{font-size:2.2vh}
+.card.ap2 .mega{font-size:3.3vh;margin-top:.2vh}
+.card.ap2 .big{font-size:2vh}
+.card.ap2 .arroba{font-size:2vh;margin-top:.2vh}
+.card.ap2 .txt{font-size:1.1vh;margin-top:.35vh}
+.card.ap2 .fila2{margin-top:.3vh;gap:.7vh}
+.card.ap3 .ceja{font-size:.95vh;letter-spacing:.5px;margin-bottom:.2vh}
+.card.ap3 h2{font-size:1.85vh}
+.card.ap3 .mega{font-size:2.7vh;margin-top:.15vh}
+.card.ap3 .big{font-size:1.7vh}
+.card.ap3 .arroba{font-size:1.7vh;margin-top:.15vh}
+.card.ap3 .txt{font-size:.95vh;margin-top:.25vh}
+.card.ap3 .fila2{margin-top:.25vh;gap:.5vh}
 .vivo{display:inline-flex;align-items:center;gap:5px;background:var(--rojo);border-radius:999px;
   padding:2px 10px;font-weight:700;letter-spacing:1px;font-size:1.4vh}
 .vivo i{width:6px;height:6px;border-radius:999px;background:#fff;animation:pal 1.2s ease-in-out infinite}
@@ -195,7 +220,8 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
 .fil.alerta{border-color:rgba(255,42,42,.5);background:rgba(215,37,42,.09);opacity:1}
 .fil.alerta .n{color:var(--led)!important;letter-spacing:2.5px}
 #avisoCupo,.avisoCupo{text-align:center;color:var(--led);font-weight:700;letter-spacing:3px;
-  font-size:1.5vh;padding-top:.6%;animation:brilla 1.3s ease-in-out infinite}
+  font-size:calc(1.5vh * var(--apr,1));padding-top:calc(.6% * var(--apr,1));
+  animation:brilla 1.3s ease-in-out infinite}
 
 /* panel de mujeres: desafío, no tabla */
 .metaFem{text-align:center;padding:1.4% 0 .8%}
@@ -251,7 +277,7 @@ const CFG = {
 
 const T = {                     // tiempos, todo en un solo lugar
   reloj:15000, tab:9000, card:9000, header:9000, idle:5000,
-  packsCada:110000, packsDura:18000,
+  packsCada:60000, packsDura:20000,
   revancha:7000, recordCierra:5600, golpeVisible:60000,
   antiQuema:60000
 };
@@ -644,36 +670,48 @@ function pintarRanking(){
   const vis=cupos(lista.length);
   const libres=vis-lista.length;
   const alerta=vis>=8&&libres>0;
-  const fs=(2.35-(vis-5)*0.135).toFixed(2);   // el renglón se achica al abrirse más cupos
-  const fled=(2.75-(vis-5)*0.14);
-  for(let i=0;i<vis;i++){
-    const e=lista[i];
-    const row=cre('div','fil'+(i===0&&e?' uno':'')+(e?'':' vacio')+(!e&&alerta?' alerta':''));
-    const pos=cre('span','pos',String(i+1));
-    pos.style.color=e?(i===0?oro:i===1?'#cbd5e1':i===2?'#b45309':'#4b5563'):(alerta?'#FF2A2A':'#3a4150');
-    row.appendChild(pos);
-    const dat=cre('div','dat');
-    const n=cre('span','n',e?e.nombre:(alerta?'LUGAR LIBRE':(fem?'— SÉ LA PRIMERA —':'— TU NOMBRE ACÁ —')));
-    n.style.fontSize=fs+'vh';
-    dat.appendChild(n);
-    if(e&&e.ig)dat.appendChild(cre('span','a',e.ig));
-    row.appendChild(dat);
-    if(e)row.appendChild(led(e.score,fled,i===0?oro:led2));
-    f.appendChild(row);
-  }
-  /* El que quedó justo afuera del top 5 es el que más cerca está de comprar
-     otro tiro. Se le dice el número exacto que le falta. */
-  if(t.id!=='historico' && lista.length>=5 && lista[4]){
-    const corte=lista[4].score;
-    const af=cre('div','avisoCupo','CON '+(corte+1)+' PUNTOS ENTRÁS AL TOP 5');
-    af.style.color='var(--oro)';
-    f.appendChild(af);
-  }
-  if(alerta){
-    const av=cre('div','avisoCupo',
-      libres===1?'QUEDA 1 LUGAR EN EL TOP 10':`QUEDAN ${libres} LUGARES EN EL TOP 10`);
-    f.appendChild(av);
-  }
+
+  /* Se dibuja con un factor de escala. Si el conjunto (filas + los dos avisos
+     de abajo) no entra en el alto del panel, se vuelve a dibujar mas chico.
+     Antes no se medía: los avisos se salían del panel y quedaban pintados
+     encima de las cards de la zona baja. */
+  const dibujar=(k)=>{
+    f.innerHTML='';
+    f.style.setProperty('--apr',k.toFixed(3));
+    const fs=((2.35-(vis-5)*0.135)*k).toFixed(2);   // el renglón se achica al abrirse más cupos
+    const fled=(2.75-(vis-5)*0.14)*k;
+    for(let i=0;i<vis;i++){
+      const e=lista[i];
+      const row=cre('div','fil'+(i===0&&e?' uno':'')+(e?'':' vacio')+(!e&&alerta?' alerta':''));
+      const pos=cre('span','pos',String(i+1));
+      pos.style.fontSize=(2*k)+'vh';
+      pos.style.color=e?(i===0?oro:i===1?'#cbd5e1':i===2?'#b45309':'#4b5563'):(alerta?'#FF2A2A':'#3a4150');
+      row.appendChild(pos);
+      const dat=cre('div','dat');
+      const n=cre('span','n',e?e.nombre:(alerta?'LUGAR LIBRE':(fem?'— SÉ LA PRIMERA —':'— TU NOMBRE ACÁ —')));
+      n.style.fontSize=fs+'vh';
+      dat.appendChild(n);
+      if(e&&e.ig){const a=cre('span','a',e.ig);a.style.fontSize=(1.25*k)+'vh';dat.appendChild(a);}
+      row.appendChild(dat);
+      if(e)row.appendChild(led(e.score,fled,i===0?oro:led2));
+      f.appendChild(row);
+    }
+    /* El que quedó justo afuera del top 5 es el que más cerca está de comprar
+       otro tiro. Se le dice el número exacto que le falta. */
+    if(t.id!=='historico' && lista.length>=5 && lista[4]){
+      const corte=lista[4].score;
+      const af=cre('div','avisoCupo','CON '+(corte+1)+' PUNTOS ENTRÁS AL TOP 5');
+      af.style.color='var(--oro)';
+      f.appendChild(af);
+    }
+    if(alerta){
+      const av=cre('div','avisoCupo',
+        libres===1?'QUEDA 1 LUGAR EN EL TOP 10':`QUEDAN ${libres} LUGARES EN EL TOP 10`);
+      f.appendChild(av);
+    }
+  };
+  dibujar(1);
+  for(let i=1;i<=14 && f.scrollHeight>f.clientHeight+1;i++) dibujar(Math.max(0.42,1-0.05*i));
 }
 setInterval(()=>{if(S.ocupado||S.packsAbierto)return;S.tab=(S.tab+1)%TABS.length;pintarTabs();pintarRanking();},T.tab);
 
@@ -821,6 +859,21 @@ function pintarCard(){
     c.appendChild(r);
   }
   if(d.txt)c.appendChild(cre('div','txt',d.txt));
+  acomodarCard(c);
+}
+
+/* Mide la card ya dibujada. Si el contenido es mas alto que la caja, aprieta
+   un escalon; si todavia desborda, dos. La card de "TE DEVOLVEMOS $2.000" se
+   pasaba por unos pocos pixeles y el "Etiquetanos @beerpunch.mdz" quedaba
+   cortado contra el borde de abajo. */
+function acomodarCard(c){
+  c.classList.remove('ap1','ap2','ap3');
+  const pasos=['ap1','ap2','ap3'];
+  for(let i=0;i<pasos.length;i++){
+    if(c.scrollHeight<=c.clientHeight+1)return;
+    c.classList.remove('ap1','ap2','ap3');
+    c.classList.add(pasos[i]);
+  }
 }
 setInterval(()=>{if(S.ocupado||S.packsAbierto)return;S.card++;pintarCard();},T.card);
 
@@ -982,7 +1035,7 @@ function aplicarEstado(e,deCache){
   if(!e)return;
   /* Si el TV Box se reinicia a las 2 AM sin WiFi, antes arrancaba en blanco
      y parecía que no había jugado nadie. Ahora recupera lo último que vio. */
-  if(!deCache){ try{ localStorage.setItem('bp_estado',JSON.stringify({e:e,ts:Date.now()})); }catch(x){} }
+  if(!deCache){ try{ localStorage.setItem('bp_estado',JSON.stringify({e:e,ts:Date.now(),noche:claveNocheLocal()})); }catch(x){} }
   S.rk.noche=e.noche||[]; S.rk.mujeres=e.mujeres||[]; S.rk.historico=e.historico||[];
   if(e.record)S.record={score:e.record.score||0,nombre:e.record.nombre||null};
   if(typeof e.piñas==='number')S.piñas=e.piñas;
@@ -1028,11 +1081,23 @@ function pollear(){
   const traer=()=>fetch((CFG.API||'')+'/api/estado').then(r=>r.json()).then(aplicarEstado).catch(()=>{});
   traer(); setInterval(traer,15000);
 }
+/* La noche del bar arranca al mediodia (por eso una madrugada del martes
+   sigue siendo "la noche del lunes"). Antes del mediodia, es la de ayer. */
+function claveNocheLocal(d){
+  const c=new Date(d||Date.now());
+  if(c.getHours()<12) c.setDate(c.getDate()-1);
+  return c.getFullYear()+'-'+String(c.getMonth()+1).padStart(2,'0')+'-'+String(c.getDate()).padStart(2,'0');
+}
 /* Primero lo último guardado (instantáneo), después lo real del server. */
 try{
   const c=JSON.parse(localStorage.getItem('bp_estado')||'null');
-  /* Si es de otra noche no sirve: mostraría un ranking viejo como si fuera de hoy. */
-  if(c&&c.e&&(Date.now()-c.ts)<10*3600e3) aplicarEstado(c.e,true);
+  /* Si es de otra noche no sirve: mostraria un ranking viejo como si fuera
+     de hoy. Antes esto se decidia solo con "hace menos de 10 horas", pero
+     apenas cerraba el bar (por ej. 10 de la manana, unas horas despues del
+     cierre) esa cuenta todavia daba menos de 10h y se seguia mostrando el
+     ranking de la noche anterior como si fuera el de esta noche. Ahora se
+     compara la noche exacta: si cambio la noche, el cache no sirve. */
+  if(c&&c.e&&c.noche===claveNocheLocal()&&(Date.now()-c.ts)<10*3600e3) aplicarEstado(c.e,true);
 }catch(x){}
 fetch((CFG.API||'')+'/api/estado').then(r=>r.json()).then(function(e){aplicarEstado(e);}).catch(()=>{});
 conectar();
