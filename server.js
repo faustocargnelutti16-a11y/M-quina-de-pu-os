@@ -102,6 +102,22 @@ try {
   motivoSinPersistencia = e.message;
 }
 
+// Escritura atomica. writeFileSync pelado deja el JSON partido a la mitad si
+// se corta la luz justo en el medio, y en el arranque siguiente el server no
+// levanta. Escribimos a un temporal, lo bajamos a disco de verdad con fsync y
+// recien ahi renombramos: el rename es todo o nada.
+function escribirAtomico(archivo, texto) {
+  const tmp = archivo + '.tmp';
+  const fd = fs.openSync(tmp, 'w');
+  try {
+    fs.writeSync(fd, texto);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tmp, archivo);
+}
+
 function leerJSON(archivo, porDefecto) {
   if (!persistenciaOk) return porDefecto;
   try {
@@ -119,7 +135,7 @@ let caidas = [];
 
 function guardarCaidas() {
   if (!persistenciaOk) return;
-  try { fs.writeFileSync(F_ENCENDIDOS, JSON.stringify(caidas)); } catch (e) {}
+  try { escribirAtomico(F_ENCENDIDOS, JSON.stringify(caidas)); } catch (e) {}
 }
 
 function abrirCaida(desde) {
@@ -178,9 +194,9 @@ function guardarTodo() {
   setTimeout(function () {
     guardadoPendiente = false;
     try {
-      fs.writeFileSync(F_PAGOS, JSON.stringify(pagosProcesados));
-      fs.writeFileSync(F_LOG, JSON.stringify(eventos));
-      fs.writeFileSync(F_VENTAS, JSON.stringify(ventas));
+      escribirAtomico(F_PAGOS, JSON.stringify(pagosProcesados));
+      escribirAtomico(F_LOG, JSON.stringify(eventos));
+      escribirAtomico(F_VENTAS, JSON.stringify(ventas));
     } catch (e) {
       console.log('error guardando en /data: ' + e.message);
     }
@@ -203,19 +219,27 @@ let pagosProcesados = leerJSON(F_PAGOS, {});
 caidas = leerJSON(F_ENCENDIDOS, []);
 let cantidadProcesados = Object.keys(pagosProcesados).length;
 let ultimoArranqueShelly = 0;
+
+// El modulo de metricas. Se llena mas abajo, cuando se monta. Queda declarado
+// aca arriba porque varias funciones de este archivo le avisan cosas, y como
+// esas funciones corren despues, para entonces ya esta cargado.
+let MET = null;
 // Que red wifi esta usando el Shelly y con cuanta senal. El script se lo
 // manda en cada consulta; solo lo anotamos en el log cuando CAMBIA, para
 // no ensuciar. Sirve para saber si se paso a la red de respaldo y si la
 // senal se cae antes de que se corte.
 let redShelly = '';
-let senalShelly = '';
+let se\u00f1alShelly = '';
 let redDesde = 0;
 
 function anotarRed(req) {
   const ssid = String(req.query.ssid || '').slice(0, 32);
   const rssi = String(req.query.rssi || '').slice(0, 6);
   if (!ssid) return;
-  if (rssi) senalShelly = rssi;
+  if (rssi) se\u00f1alShelly = rssi;
+  // Metricas guarda el historial de redes en disco: solo cuando cambia, para
+  // no escribir un archivo entero cada 4,6 segundos.
+  if (MET) { try { MET.anotarRed(ssid, rssi); } catch (e) {} }
   if (ssid !== redShelly) {
     log('RED WIFI', 'el Shelly esta en "' + ssid + '"' +
         (rssi ? ' (se\u00f1al ' + rssi + ' dBm)' : '') +
@@ -823,7 +847,7 @@ app.get('/estado', function (req, res) {
     'fichas ultimos ' + VENTANA_MIN + ' min = ' + ultimas + ' (tope ' + MAX_FICHAS_VENTANA + ')\n' +
     'ultimo poll del Shelly = ' + (segDesdePoll < 0 ? 'nunca' : 'hace ' + segDesdePoll + ' s') + '\n' +
     'red wifi del Shelly = ' + (redShelly
-        ? (redShelly + (senalShelly ? ' (se\u00f1al ' + senalShelly + ' dBm)' : '') +
+        ? (redShelly + (se\u00f1alShelly ? ' (se\u00f1al ' + se\u00f1alShelly + ' dBm)' : '') +
            (redDesde ? ' desde hace ' + Math.round((Date.now() - redDesde) / 60000) + ' min' : ''))
         : 'no informada (script viejo)') + '\n' +
     'ultimo arranque del Shelly = ' + (ultimoArranqueShelly ? new Date(ultimoArranqueShelly).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) : 'sin avisos desde que arranco el server') + '\n' +
@@ -1101,7 +1125,12 @@ function paginaEscaneo(req, res) {
     '.then(function(r){return r.text()})' +
     '.then(function(t){document.open();document.write(t);document.close();})' +
     '.catch(function(){b.disabled=false;b.innerHTML="<span>Reintentar</span>";});' +
-    '}</script>';
+    '}</script>' +
+    // Aviso de escaneo: se manda 1,2 segundos despues de cargar, desde el
+    // navegador. Las vistas previas de WhatsApp entran a la pagina sin que
+    // nadie la haya mirado, pero no ejecutan JavaScript ni esperan; una
+    // persona de verdad si. Asi el embudo cuenta escaneos reales.
+    (MET ? MET.scriptDeEscaneo(cod) : '');
 
   res.type('text/html').send(paginaCupon({
     titulo: '\u00bfTe<br>anim\u00e1s?',
@@ -1459,6 +1488,9 @@ app.get('/shelly-ack', function (req, res) {
 // "apagaron la maquina y la prendieron" de "se colgo el wifi y volvio solo".
 app.get('/shelly-hello', function (req, res) {
   ultimoArranqueShelly = Date.now();
+  // Guardado en disco: sin esto se perdia en cada deploy, y como cerrarCaida()
+  // compara contra este valor, TODOS los cortes quedaban marcados como wifi.
+  if (MET) { try { MET.anotarArranque(); } catch (e) {} }
   ultimoPoll = Date.now();
   anotarRed(req);
   log('SHELLY ARRANCO', 'el Shelly acaba de encenderse (corte de luz o reinicio)');
@@ -1753,6 +1785,7 @@ app.get('/admin', function (req, res) {
 '<div class="seccion">' +
 '<h2 class="titulo">Ver m\u00e1s</h2>' +
 '<div class="botones">' +
+'<a class="b ancho" style="background:var(--cuero);border-color:var(--cuero)" href="/metricas' + c + '">Panel de m\u00e9tricas</a>' +
 '<a class="b" href="/log">Historial</a>' +
 '<a class="b" href="/caja">Caja detallada</a>' +
 '<a class="b" href="/panel">Panel del bar</a>' +
@@ -1930,6 +1963,38 @@ app.post('/webhook', function (req, res) {
 // ===== MODULO DE PINAS =====
 // Va aca: despues de que todo lo de arriba esta definido, antes de escuchar.
 // Si este modulo falla, el cobro sigue funcionando igual.
+// El modulo de metricas. Primero este, porque el resto del server le avisa
+// cosas (la red del Shelly, los arranques, los escaneos de cupon) y conviene
+// que este cargado lo antes posible. Si falla, el cobro sigue andando.
+try {
+  const montarMetricas = require('./metricas');
+  MET = montarMetricas(app, {
+    DATA_DIR: DATA_DIR,
+    persistenciaOk: persistenciaOk,
+    log: log,
+    claveOk: claveOk,
+    CLAVE: CLAVE,
+    HORA_ABRE: HORA_ABRE,
+    PORCENTAJE_BAR: PORCENTAJE_BAR,
+    inicioJornada: inicioJornada,
+    avisar: avisar,
+    datos: {
+      ventas:  function () { return ventas; },
+      caidas:  function () { return caidas; },
+      cupones: function () { return cupones; },
+      canjes:  function () { return canjes; }
+    }
+  });
+  // Recuperamos el ultimo arranque del Shelly guardado en disco. Sin esto
+  // arrancaba en 0 despues de cada deploy y la clasificacion de los cortes
+  // salia siempre "wifi".
+  const guardado = MET.ultimoArranque();
+  if (guardado > ultimoArranqueShelly) ultimoArranqueShelly = guardado;
+} catch (e) {
+  MET = null;
+  log('METRICAS', 'no se pudo montar el modulo: ' + e.message + ' (el cobro sigue andando)');
+}
+
 try {
   const montarPinas = require('./pinas');
   montarPinas(app, {
