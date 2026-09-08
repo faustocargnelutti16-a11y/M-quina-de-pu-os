@@ -29,12 +29,12 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
 /* ═══ cabecera ═══ */
 #cab{padding:2.4% 4.5% 0;flex:none}
 .fila{display:flex;align-items:center;justify-content:center;gap:2.6%}
-#logo{width:6.4vh;height:6.4vh;flex:none;object-fit:contain}
-.marca{font-family:var(--negra);font-size:4.4vh;line-height:1;letter-spacing:.5px;white-space:nowrap}
+#logo{width:calc(6.4 * var(--u));height:calc(6.4 * var(--u));flex:none;object-fit:contain}
+.marca{font-family:var(--negra);font-size:calc(4.4 * var(--u));line-height:1;letter-spacing:.5px;white-space:nowrap}
 .marca .p{color:var(--rojo)}
 #sub{display:flex;justify-content:space-between;align-items:baseline;margin-top:1.3%;gap:8px}
-#lema{color:var(--oro);letter-spacing:4px;font-weight:700;font-size:1.55vh;white-space:nowrap}
-#reloj{color:#fff;font-weight:600;letter-spacing:1px;font-size:1.75vh;white-space:nowrap}
+#lema{color:var(--oro);letter-spacing:4px;font-weight:700;font-size:calc(1.55 * var(--u));white-space:nowrap}
+#reloj{color:#fff;font-weight:600;letter-spacing:1px;font-size:calc(1.75 * var(--u));white-space:nowrap}
 #reloj b{color:var(--oro);font-weight:600}
 .regla{height:2px;margin-top:1.3%;border-radius:2px;
   background:linear-gradient(90deg,var(--rojo),transparent 72%)}
@@ -44,11 +44,11 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
   border-radius:15px;text-align:center;
   background:radial-gradient(ellipse at 50% 0%,rgba(215,37,42,.15),rgba(0,0,0,.35) 74%);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 0 54px -14px rgba(215,37,42,.45)}
-.et{color:var(--suave);letter-spacing:6px;font-weight:700;font-size:1.75vh}
-#recLed{display:flex;justify-content:center;margin:1% 0;min-height:7.6vh;align-items:center}
-#recNom{font-family:var(--negra);font-size:2.9vh;letter-spacing:2px;color:#fff}
+.et{color:var(--suave);letter-spacing:6px;font-weight:700;font-size:calc(1.75 * var(--u))}
+#recLed{display:flex;justify-content:center;margin:1% 0;min-height:calc(7.6 * var(--u));align-items:center}
+#recNom{font-family:var(--negra);font-size:calc(2.9 * var(--u));letter-spacing:2px;color:#fff}
 #recNom span{font-family:var(--cuerpo);font-weight:500;color:var(--suave);font-size:.62em;letter-spacing:1px}
-#recPie{color:var(--oro);font-weight:700;letter-spacing:4px;font-size:2.1vh;margin-top:.4vh}
+#recPie{color:var(--oro);font-weight:700;letter-spacing:4px;font-size:calc(2.1 * var(--u));margin-top:calc(.4 * var(--u))}
 
 /* ═══ ticker ═══ */
 #ticker{flex:none;margin:1.7% 4.5% 0;height:7.4%;border-radius:11px;overflow:hidden;
@@ -56,12 +56,12 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
   display:flex;align-items:center}
 #ticker .caja{width:100%;padding:0 4%}
 #ticker .top{display:flex;align-items:center;gap:9px}
-#ticker .nom{font-weight:700;letter-spacing:2px;font-size:2.7vh;white-space:nowrap}
-#ticker .ig{color:var(--suave);font-weight:500;font-size:1.5vh;flex:1;overflow:hidden;
+#ticker .nom{font-weight:700;letter-spacing:2px;font-size:calc(2.7 * var(--u));white-space:nowrap}
+#ticker .ig{color:var(--suave);font-weight:500;font-size:calc(1.5 * var(--u));flex:1;overflow:hidden;
   white-space:nowrap;text-overflow:ellipsis}
-#ticker .ctx{color:var(--oro);font-weight:700;letter-spacing:1.5px;font-size:1.55vh;margin-top:2px;
+#ticker .ctx{color:var(--oro);font-weight:700;letter-spacing:1.5px;font-size:calc(1.55 * var(--u));margin-top:2px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#ticker .idle{width:100%;text-align:center;font-weight:700;letter-spacing:4px;font-size:2vh;color:#fff}
+#ticker .idle{width:100%;text-align:center;font-weight:700;letter-spacing:4px;font-size:calc(2.7 * var(--u));color:#fff;line-height:1.15}
 @keyframes entra{0%{transform:translateX(110%);opacity:0}12%{transform:none;opacity:1}100%{transform:none;opacity:1}}
 @keyframes suave{0%{opacity:0;transform:translateY(8px)}15%{opacity:1;transform:none}85%{opacity:1}100%{opacity:0}}
 
@@ -69,21 +69,21 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
 #rank{flex:1;margin:1.7% 4.5% 0;display:flex;flex-direction:column;min-height:0}
 #tabs{display:flex;gap:3px}
 #tabs button{flex:1;padding:1.5% 0;border:none;border-radius:9px 9px 0 0;cursor:default;
-  font-family:var(--cuerpo);font-weight:700;letter-spacing:1px;font-size:1.7vh;
+  font-family:var(--cuerpo);font-weight:700;letter-spacing:1px;font-size:calc(1.7 * var(--u));
   background:rgba(255,255,255,.06);color:var(--tenue)}
 #tabs button.on{background:var(--oro);color:#000}
 #tabs button.on.fem{background:var(--rosa);color:#fff}
-#tabs button.fem{font-family:var(--fem);font-style:italic;font-size:1.85vh}
+#tabs button.fem{font-family:var(--fem);font-style:italic;font-size:calc(1.85 * var(--u))}
 #panel{flex:1;border:1px solid var(--borde);border-top:2px solid var(--oro);border-radius:0 0 13px 13px;
   padding:1.5% 3%;display:flex;flex-direction:column;min-height:0;background:rgba(0,0,0,.3);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 10px 28px -14px rgba(0,0,0,.75)}
 #panel.fem{border-top-color:var(--rosa);
   background:radial-gradient(ellipse at 50% 0%,rgba(241,67,123,.1),rgba(0,0,0,.3) 74%)}
 #premioEt{text-align:center;padding:1% 2%;margin-bottom:1%;border-radius:9px;
-  background:rgba(255,213,24,.09);color:var(--oro);font-weight:700;letter-spacing:1.2px;font-size:1.6vh}
+  background:rgba(255,213,24,.09);color:var(--oro);font-weight:700;letter-spacing:1.2px;font-size:calc(1.6 * var(--u))}
 #panel.fem #premioEt{background:rgba(241,67,123,.12);color:var(--rosa);
-  font-family:var(--fem);font-style:italic;letter-spacing:.3px;font-size:1.95vh}
-#cuenta{text-align:center;font-weight:700;letter-spacing:2.5px;font-size:1.55vh;padding:.4% 0 .8%;color:#fff}
+  font-family:var(--fem);font-style:italic;letter-spacing:.3px;font-size:calc(1.95 * var(--u))}
+#cuenta{text-align:center;font-weight:700;letter-spacing:2.5px;font-size:calc(1.55 * var(--u));padding:.4% 0 .8%;color:#fff}
 #cuenta b{color:var(--oro)}
 #cuenta.urge b{color:var(--led)}
 #filas{flex:1;display:flex;flex-direction:column;justify-content:space-evenly;min-height:0}
@@ -93,73 +93,74 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
 .fil.uno{border-color:rgba(255,213,24,.4)}
 #panel.fem .fil{border-radius:20px;background:rgba(241,67,123,.06)}
 #panel.fem .fil.uno{border-color:rgba(241,67,123,.45)}
-.fil .pos{font-family:var(--negra);width:9%;text-align:center;font-size:2vh}
+.fil .pos{font-family:var(--negra);width:9%;text-align:center;font-size:calc(2 * var(--u))}
 .fil .dat{flex:1;min-width:0}
-.fil .n{display:block;font-weight:700;letter-spacing:1.4px;font-size:2.2vh;color:#fff;
+.fil .n{display:block;font-weight:700;letter-spacing:1.4px;font-size:calc(2.2 * var(--u));color:#fff;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#panel.fem .fil .n{font-family:var(--fem);font-style:italic;letter-spacing:.4px;font-size:2.4vh}
-.fil .a{display:block;color:var(--suave);font-weight:500;font-size:1.25vh}
+#panel.fem .fil .n{font-family:var(--fem);font-style:italic;letter-spacing:.4px;font-size:calc(2.4 * var(--u))}
+.fil .a{display:block;color:var(--suave);font-weight:500;font-size:calc(1.25 * var(--u))}
 .fil.vacio{opacity:.42}
 .fil.vacio .n{color:var(--tenue);letter-spacing:3px;font-weight:600}
 
 /* ═══ zona baja ═══ */
-#baja{flex:none;margin:1.7% 4.5%;height:17%;display:flex;gap:3%}
-.card{flex:1;min-width:0;border-radius:17px;padding:1.6vh 3.5%;overflow:hidden;display:flex;
+#baja{flex:none;margin:1.7% 4.5%;height:20.5%;display:flex;gap:3%}
+.card{flex:1;min-width:0;border-radius:17px;padding:calc(1.6 * var(--u)) 3.5%;overflow:hidden;display:flex;
   flex-direction:column;align-items:center;justify-content:center;text-align:center;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 10px 28px -14px rgba(0,0,0,.75)}
 /* Ritmo vertical: cada bloque tiene su propio aire y ninguno se pega al de al
    lado. Antes el gap era porcentual y con textos largos se comía el espacio. */
-.card .ceja{letter-spacing:3px;font-weight:700;font-size:1.4vh;text-transform:uppercase;
-  margin-bottom:.9vh;opacity:.95}
-.card h2{font-family:var(--poster);font-size:3vh;letter-spacing:.5px;line-height:1.04;
+.card .ceja{letter-spacing:3px;font-weight:700;font-size:calc(1.4 * var(--u));text-transform:uppercase;
+  margin-bottom:calc(.9 * var(--u));opacity:.95}
+.card h2{font-family:var(--poster);font-size:calc(3 * var(--u));letter-spacing:.5px;line-height:1.04;
   text-transform:uppercase}
-.card .mega{font-family:var(--poster);line-height:1;letter-spacing:1px;margin-top:.6vh;
-  font-size:4.8vh;text-shadow:0 0 28px currentColor}
-.card .fila2{display:flex;align-items:baseline;gap:1.2vh;flex-wrap:wrap;justify-content:center;
-  margin-top:.7vh}
-.card .big{font-family:var(--poster);font-size:2.7vh;letter-spacing:.4px;line-height:1}
-.card .txt{color:var(--suave);font-weight:600;font-size:1.4vh;line-height:1.3;margin-top:.9vh;
+.card .mega{font-family:var(--poster);line-height:1;letter-spacing:1px;margin-top:calc(.6 * var(--u));
+  font-size:calc(4.8 * var(--u));text-shadow:0 0 28px currentColor}
+.card .fila2{display:flex;align-items:baseline;gap:calc(1.2 * var(--u));flex-wrap:wrap;justify-content:center;
+  margin-top:calc(.7 * var(--u))}
+.card .big{font-family:var(--poster);font-size:calc(2.7 * var(--u));letter-spacing:.4px;line-height:1}
+.card .txt{color:var(--suave);font-weight:600;font-size:calc(1.4 * var(--u));line-height:1.3;margin-top:calc(.9 * var(--u));
   max-width:97%}
-/* 14 caracteres en Archivo Black no entran a 3.6vh: la card mide ~29vh de
-   ancho y el texto pedía 31. A 2.7vh con el tracking apretado, entra. */
-.card .arroba{font-family:var(--negra);font-size:2.7vh;line-height:1.1;color:#fff;
-  letter-spacing:-.3px;white-space:nowrap;margin-top:.6vh}
+/* 14 caracteres en Archivo Black no entran a calc(3.6 * var(--u)): la card mide ~calc(29 * var(--u)) de
+   ancho y el texto pedía 31. A calc(2.7 * var(--u)) con el tracking apretado, entra. */
+.card .arroba{font-family:var(--negra);font-size:calc(2.7 * var(--u));line-height:1.1;color:#fff;
+  letter-spacing:-.3px;white-space:nowrap;margin-top:calc(.6 * var(--u))}
 .card .arroba i{font-style:normal;color:var(--rojo)}
 /* Red de contencion: si el contenido de una card no entra en la altura de la
    zona baja, se aprieta un escalon, y si sigue sin entrar, dos. Antes se
    recortaba con overflow:hidden y el ultimo renglon quedaba pisado contra el
    borde. Solo se activa cuando desborda: si entra, no cambia nada. */
-.card.ap1 .ceja{font-size:1.2vh;letter-spacing:2px;margin-bottom:.5vh}
-.card.ap1 h2{font-size:2.6vh}
-.card.ap1 .mega{font-size:4vh;margin-top:.35vh}
-.card.ap1 .big{font-size:2.35vh}
-.card.ap1 .arroba{font-size:2.35vh;margin-top:.35vh}
-.card.ap1 .txt{font-size:1.25vh;margin-top:.5vh}
-.card.ap1 .fila2{margin-top:.45vh;gap:.9vh}
-.card.ap2 .ceja{font-size:1.05vh;letter-spacing:1px;margin-bottom:.3vh}
-.card.ap2 h2{font-size:2.2vh}
-.card.ap2 .mega{font-size:3.3vh;margin-top:.2vh}
-.card.ap2 .big{font-size:2vh}
-.card.ap2 .arroba{font-size:2vh;margin-top:.2vh}
-.card.ap2 .txt{font-size:1.1vh;margin-top:.35vh}
-.card.ap2 .fila2{margin-top:.3vh;gap:.7vh}
-.card.ap3 .ceja{font-size:.95vh;letter-spacing:.5px;margin-bottom:.2vh}
-.card.ap3 h2{font-size:1.85vh}
-.card.ap3 .mega{font-size:2.7vh;margin-top:.15vh}
-.card.ap3 .big{font-size:1.7vh}
-.card.ap3 .arroba{font-size:1.7vh;margin-top:.15vh}
-.card.ap3 .txt{font-size:.95vh;margin-top:.25vh}
-.card.ap3 .fila2{margin-top:.25vh;gap:.5vh}
+.card.ap1 .ceja{font-size:calc(1.2 * var(--u));letter-spacing:2px;margin-bottom:calc(.5 * var(--u))}
+.card.ap1 h2{font-size:calc(2.6 * var(--u))}
+.card.ap1 .mega{font-size:calc(4 * var(--u));margin-top:calc(.35 * var(--u))}
+.card.ap1 .big{font-size:calc(2.35 * var(--u))}
+.card.ap1 .arroba{font-size:calc(2.35 * var(--u));margin-top:calc(.35 * var(--u))}
+.card.ap1 .txt{font-size:calc(1.25 * var(--u));margin-top:calc(.5 * var(--u))}
+.card.ap1 .fila2{margin-top:calc(.45 * var(--u));gap:calc(.9 * var(--u))}
+.card.ap2 .ceja{font-size:calc(1.05 * var(--u));letter-spacing:1px;margin-bottom:calc(.3 * var(--u))}
+.card.ap2 h2{font-size:calc(2.2 * var(--u))}
+.card.ap2 .mega{font-size:calc(3.3 * var(--u));margin-top:calc(.2 * var(--u))}
+.card.ap2 .big{font-size:calc(2 * var(--u))}
+.card.ap2 .arroba{font-size:calc(2 * var(--u));margin-top:calc(.2 * var(--u))}
+.card.ap2 .txt{font-size:calc(1.1 * var(--u));margin-top:calc(.35 * var(--u))}
+.card.ap2 .fila2{margin-top:calc(.3 * var(--u));gap:calc(.7 * var(--u))}
+.card.ap3 .ceja{font-size:calc(.95 * var(--u));letter-spacing:.5px;margin-bottom:calc(.2 * var(--u))}
+.card.ap3 h2{font-size:calc(1.85 * var(--u))}
+.card.ap3 .mega{font-size:calc(2.7 * var(--u));margin-top:calc(.15 * var(--u))}
+.card.ap3 .big{font-size:calc(1.7 * var(--u))}
+.card.ap3 .arroba{font-size:calc(1.7 * var(--u));margin-top:calc(.15 * var(--u))}
+.card.ap3 .txt{font-size:calc(.95 * var(--u));margin-top:calc(.25 * var(--u))}
+.card.ap3 .fila2{margin-top:calc(.25 * var(--u));gap:calc(.5 * var(--u))}
 .vivo{display:inline-flex;align-items:center;gap:5px;background:var(--rojo);border-radius:999px;
-  padding:2px 10px;font-weight:700;letter-spacing:1px;font-size:1.4vh}
+  padding:2px 10px;font-weight:700;letter-spacing:1px;font-size:calc(1.4 * var(--u))}
 .vivo i{width:6px;height:6px;border-radius:999px;background:#fff;animation:pal 1.2s ease-in-out infinite}
 @keyframes pal{0%,100%{opacity:1}50%{opacity:.35}}
-#qr{flex:none;width:35%;border-radius:17px;padding:3.4% 2.4%;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:4%;border:1px dashed rgba(45,212,191,.55);
+#qr{flex:none;width:36%;border-radius:17px;padding:2.4% 2%;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:2%;border:1px dashed rgba(45,212,191,.55);
   background:radial-gradient(120% 100% at 50% -20%,rgba(45,212,191,.17),rgba(7,9,16,.75) 66%),#080a12}
 #qr svg{background:#fff;border-radius:8px;display:block}
-#qr .t1{font-family:var(--poster);color:var(--teal);font-size:2.3vh;line-height:1.02}
-#qr .t2{color:#fff;font-weight:600;font-size:1.35vh;letter-spacing:.8px;line-height:1.2;margin-top:3px}
+#qr .hueco{flex:1;min-height:0;width:100%;display:flex;align-items:center;justify-content:center}
+#qr .t1{font-family:var(--poster);color:var(--teal);font-size:calc(2.1 * var(--u));line-height:1.02;margin-top:calc(.5 * var(--u))}
+#qr .t2{color:#fff;font-weight:600;font-size:calc(1.25 * var(--u));letter-spacing:.8px;line-height:1.15;margin-top:2px}
 
 /* ═══ overlays ═══ */
 .over{position:absolute;inset:0;z-index:40;display:flex;flex-direction:column;
@@ -170,23 +171,27 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
 @keyframes estrobo{0%,100%{background:#000}50%{background:#D7252A}}
 @keyframes aparece{from{opacity:0;transform:scale(.985)}to{opacity:1;transform:none}}
 @keyframes pop{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
-@keyframes cae{0%{transform:translateY(-5vh) rotate(0);opacity:1}
-  100%{transform:translateY(105vh) rotate(720deg);opacity:.7}}
+@keyframes cae{0%{transform:translateY(calc(-5 * var(--u))) rotate(0);opacity:1}
+  100%{transform:translateY(calc(105 * var(--u))) rotate(720deg);opacity:.7}}
 @keyframes brilla{0%,100%{opacity:1}50%{opacity:.78}}
 .papel{position:absolute;top:0;z-index:52;pointer-events:none;border-radius:2px}
 #packs{position:absolute;inset:0;z-index:42;display:none;flex-direction:column;padding:4.6% 5% 4%;gap:2.6%;
   background:radial-gradient(120% 60% at 50% -5%,rgba(215,37,42,.18),rgba(4,5,10,.97) 60%),#04050a;
   animation:aparece .45s cubic-bezier(.22,1,.36,1)}
-.pk{flex:1;min-width:0;border-radius:18px;padding:3% 2.4%;display:flex;flex-direction:column;
-  align-items:center;justify-content:space-between;position:relative;border:2px solid}
+.pk{flex:1;min-width:0;border-radius:18px;padding:calc(2.4 * var(--u)) calc(1.1 * var(--u)) calc(1.1 * var(--u));
+  display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
+  gap:calc(.35 * var(--u));position:relative;border:2px solid}
+/* El QR se queda con todo lo que sobra: es lo unico de esta pantalla que la
+   gente tiene que poder usar desde la mesa. */
+.pk .hueco{flex:1;min-height:0;width:100%;display:flex;align-items:center;justify-content:center}
 .pk .tag{position:absolute;top:0;left:50%;transform:translate(-50%,-50%);border-radius:999px;
-  padding:.35em 1em;white-space:nowrap;font-weight:700;letter-spacing:1.1px;font-size:1.45vh}
-.pk .cant{font-family:var(--poster);font-size:2.9vh;letter-spacing:.4px;color:#fff;margin-top:1%}
-.pk .prec{font-family:var(--poster);font-size:4.4vh;line-height:1;color:var(--oro);
+  padding:.35em 1em;white-space:nowrap;font-weight:700;letter-spacing:1.1px;font-size:calc(1.45 * var(--u))}
+.pk .cant{font-family:var(--poster);font-size:calc(2.9 * var(--u));letter-spacing:.4px;color:#fff;margin-top:1%}
+.pk .prec{font-family:var(--poster);font-size:calc(4.4 * var(--u));line-height:1;color:var(--oro);
   text-shadow:0 0 26px rgba(255,213,24,.35)}
-.pk .cu{color:var(--suave);font-weight:600;font-size:1.55vh}
+.pk .cu{color:var(--suave);font-weight:600;font-size:calc(1.55 * var(--u))}
 .pk svg{background:#fff;border-radius:8px;display:block}
-.pk .esc{color:var(--suave);font-weight:600;letter-spacing:2px;font-size:1.25vh}
+.pk .esc{color:var(--suave);font-weight:600;letter-spacing:2px;font-size:calc(1.25 * var(--u))}
 @keyframes late{0%,100%{transform:none}50%{transform:scale(1.03)}}
 .qrEnv{position:relative;border-radius:9px;overflow:hidden;animation:latQR 2.8s ease-in-out infinite}
 @keyframes latQR{0%,100%{transform:scale(1)}50%{transform:scale(1.045)}}
@@ -220,47 +225,50 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
 .fil.alerta{border-color:rgba(255,42,42,.5);background:rgba(215,37,42,.09);opacity:1}
 .fil.alerta .n{color:var(--led)!important;letter-spacing:2.5px}
 #avisoCupo,.avisoCupo{text-align:center;color:var(--led);font-weight:700;letter-spacing:3px;
-  font-size:calc(1.5vh * var(--apr,1));padding-top:calc(.6% * var(--apr,1));
+  font-size:calc(calc(1.5 * var(--u)) * var(--apr,1));padding-top:calc(.6% * var(--apr,1));
   animation:brilla 1.3s ease-in-out infinite}
 
 /* panel de mujeres: desafío, no tabla */
 .metaFem{text-align:center;padding:1.4% 0 .8%}
-.metaFem .mL{color:var(--rosaC);font-weight:700;letter-spacing:3.5px;font-size:1.5vh}
-.metaFem .mN{font-family:var(--poster);color:var(--rosa);font-size:8.2vh;line-height:1;
+.metaFem .mL{color:var(--rosaC);font-weight:700;letter-spacing:3.5px;font-size:calc(1.5 * var(--u))}
+.metaFem .mN{font-family:var(--poster);color:var(--rosa);font-size:calc(8.2 * var(--u));line-height:1;
   text-shadow:0 0 34px rgba(241,67,123,.55)}
 .listaFem{flex:1;display:flex;flex-direction:column;justify-content:center;gap:1.6%;padding:0 2%}
-.listaFem .fL{text-align:center;color:var(--suave);font-weight:600;letter-spacing:2.5px;font-size:1.4vh}
+.listaFem .fL{text-align:center;color:var(--suave);font-weight:600;letter-spacing:2.5px;font-size:calc(1.4 * var(--u))}
 .filF{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:.6% 4%;
   border-radius:20px;background:rgba(241,67,123,.08)}
-.filF .n{font-family:var(--fem);font-style:italic;font-weight:700;font-size:2.3vh;color:#fff;
+.filF .n{font-family:var(--fem);font-style:italic;font-weight:700;font-size:calc(2.3 * var(--u));color:#fff;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fVacio{text-align:center;font-family:var(--fem);font-style:italic;color:var(--rosaC);
-  font-size:2.6vh;font-weight:700}
+  font-size:calc(2.6 * var(--u));font-weight:700}
 .reina{text-align:center;padding:1.4% 0 .6%;border-top:1px solid rgba(241,67,123,.25)}
-.reina .rL{display:block;color:var(--rosaC);font-weight:700;letter-spacing:3.5px;font-size:1.35vh}
+.reina .rL{display:block;color:var(--rosaC);font-weight:700;letter-spacing:3.5px;font-size:calc(1.35 * var(--u))}
 .reina .rN{display:block;font-family:var(--fem);font-style:italic;font-weight:700;
-  color:#fff;font-size:3vh;line-height:1.15}
-.reina .rP{display:block;color:var(--suave);font-weight:500;font-size:1.35vh;letter-spacing:1px}
+  color:#fff;font-size:calc(3 * var(--u));line-height:1.15}
+.reina .rP{display:block;color:var(--suave);font-weight:500;font-size:calc(1.35 * var(--u));letter-spacing:1px}
 
 </style>
 </head>
 <body>
 <div id="marco"><div id="app"></div></div>
 
-<!-- Silk (Fire TV) deja la barra de direcciones a un costado y no hay forma
-     de sacarla sin un gesto del usuario: esta pantalla de arranque pide un
-     solo toque, pide pantalla completa y de paso destraba el video mudo
-     anti-reposo, que en algunos navegadores tambien precisa un gesto. -->
+<!-- Silk (Fire TV) deja la barra de direcciones a un costado y el sonido y
+     el video anti-reposo no arrancan solos: los tres piden un gesto real
+     del usuario, y el navegador no deja saltarselo con codigo. Por eso hace
+     falta un toque, pero no tapa el totem: es un cartelito chico encima,
+     el totem se ve completo detras desde el primer segundo. -->
 <div id="arranque" style="position:fixed;inset:0;z-index:99999;
-  background:#050608;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:3vh;cursor:pointer">
-  <div style="font-family:var(--negra);font-size:7vh;color:#fff;
-    letter-spacing:1px">BEER<span style="color:#D7252A">PUNCH</span></div>
-  <div style="font-family:var(--poster);font-size:4vh;color:#FFD518;
-    letter-spacing:2px;text-align:center;line-height:1.3">
-    TOCÁ OK<br>PARA EMPEZAR LA NOCHE</div>
-  <div style="font-family:var(--cuerpo);font-size:1.8vh;color:#8A8A96;
-    letter-spacing:1px">un solo toque &middot; queda listo hasta que cierre el bar</div>
+  background:transparent;display:flex;align-items:center;justify-content:center;
+  pointer-events:auto;cursor:pointer">
+  <div style="background:rgba(5,6,8,.94);border:1px solid rgba(255,213,24,.4);
+    border-radius:16px;padding:calc(2.6 * var(--u)) calc(4 * var(--u));display:flex;flex-direction:column;
+    align-items:center;gap:calc(.8 * var(--u));box-shadow:0 10px 40px -10px rgba(0,0,0,.8)">
+    <div style="font-family:var(--poster);font-size:calc(2.6 * var(--u));color:#FFD518;
+      letter-spacing:1.5px;text-align:center;line-height:1.25">
+      TOCÁ OK PARA EMPEZAR</div>
+    <div style="font-family:var(--cuerpo);font-size:calc(1.3 * var(--u));color:#8A8A96;
+      letter-spacing:.5px">un solo toque &middot; activa sonido y pantalla completa</div>
+  </div>
 </div>
 
 <script>
@@ -394,13 +402,19 @@ function qrSVG(texto,px,quiet){
   let m=cacheQR.get(texto);
   if(m===undefined){try{m=qrMatrix(texto);}catch(e){m=null;}cacheQR.set(texto,m);}
   if(!m)return null;
-  const n=m.length,tot=n+quiet*2,c=px/tot,d=[];
+  /* Cada cuadradito del QR tiene que medir un numero ENTERO de pixeles. Si
+     mide 2,25 px, el navegador redondea cada uno para su lado: unos salen de
+     2 px y otros de 3, el dibujo queda rayado y el telefono no lo lee. Los QR
+     de Mercado Pago son largos (muchos cuadraditos), asi que es justo donde
+     mas se notaba. Achicamos hasta el multiplo entero mas cercano: se pierden
+     unos pocos pixeles de lado y se gana un QR que se escanea. */
+  const n=m.length,tot=n+quiet*2,c=Math.max(1,Math.floor(px/tot)),lado=c*tot,d=[];
   for(let y=0;y<n;y++){let x=0;while(x<n){
     if(!m[y][x]){x++;continue;}
     let w=1;while(x+w<n&&m[y][x+w])w++;
     d.push(`M${(x+quiet)*c} ${(y+quiet)*c}h${w*c}v${c}h${-w*c}z`);x+=w;}}
   const s=document.createElementNS('http://www.w3.org/2000/svg','svg');
-  s.setAttribute('viewBox',`0 0 ${px} ${px}`);s.setAttribute('width',px);s.setAttribute('height',px);
+  s.setAttribute('viewBox',`0 0 ${lado} ${lado}`);s.setAttribute('width',lado);s.setAttribute('height',lado);
   const p=document.createElementNS('http://www.w3.org/2000/svg','path');
   p.setAttribute('d',d.join(''));p.setAttribute('fill','#000');p.setAttribute('shape-rendering','crispEdges');
   s.appendChild(p);return s;
@@ -413,13 +427,13 @@ const MAPA={'0':'abcdef','1':'bc','2':'abged','3':'abgcd','4':'fgbc','5':'afgcd'
   '6':'afgedc','7':'abc','8':'abcdefg','9':'abcdfg','-':'g',' ':''};
 function led(valor,alturaVh,color){
   const cont=cre('div');
-  cont.style.cssText=`display:flex;gap:${alturaVh*.14}vh;transform:skewX(-4deg)`;
+  cont.style.cssText=`display:flex;gap:calc(${alturaVh*.14} * var(--u));transform:skewX(-4deg)`;
   String(valor).split('').forEach(ch=>{
     const on=MAPA[ch]||'';
     const s=document.createElementNS('http://www.w3.org/2000/svg','svg');
     s.setAttribute('viewBox','0 0 60 100');
-    s.style.cssText=`height:${alturaVh}vh;width:${alturaVh*.6}vh;flex:none;
-      filter:drop-shadow(0 0 ${alturaVh/14}vh ${color})`;
+    s.style.cssText=`height:calc(${alturaVh} * var(--u));width:calc(${alturaVh*.6} * var(--u));flex:none;
+      filter:drop-shadow(0 0 calc(${alturaVh/14} * var(--u)) ${color})`;
     for(const k in SEG){const[x,y,w,h]=SEG[k];
       const r=document.createElementNS('http://www.w3.org/2000/svg','rect');
       r.setAttribute('x',x);r.setAttribute('y',y);r.setAttribute('width',w);r.setAttribute('height',h);
@@ -527,15 +541,29 @@ app.innerHTML=`
 `;
 
 /* ─── proporción 9:16 + rotación opcional ─── */
+/* La unidad de todo el diseno. Antes se usaba "vh", que mide contra el alto de
+   la VENTANA. Cuando el totem se gira 90 grados, el alto de la ventana pasa a
+   ser el lado corto de la TV (1080) mientras que el totem mide 1920 de alto:
+   todo terminaba dibujado al 56% (9/16) del tamano disenado, y el sobrante
+   quedaba como espacio muerto entre las cosas. --u siempre vale 1% del alto
+   real del totem, este girado o no. En vertical da exactamente lo mismo que
+   antes; girado, devuelve el diseno a su tamano real. */
+let UPX = window.innerHeight/100;
+function fijarUnidad(altoApp){
+  UPX = altoApp/100;
+  document.documentElement.style.setProperty('--u', UPX+'px');
+}
 function medir(){
   const W=window.innerWidth,H=window.innerHeight;
   let w,h;
   if(CFG.ROTAR_90){ h=Math.min(H,W*9/16); w=h*16/9;
     app.style.width=h+'px'; app.style.height=w+'px';
     app.style.transform=`rotate(90deg) translate(${S.qx||0}px,${S.qy||0}px)`;
+    fijarUnidad(w);
   }else{ h=Math.min(H,W*16/9); w=h*9/16;
     app.style.width=w+'px'; app.style.height=h+'px';
     app.style.transform=`translate(${S.qx||0}px,${S.qy||0}px)`;
+    fijarUnidad(h);
   }
 }
 window.addEventListener('resize',medir); medir();
@@ -599,8 +627,8 @@ function pintarLema(){
   const p=piñasMostradas();
   const l=$('#lema');
   if(p&&S.headerAlt%2===1){
-    l.innerHTML=`<span style="font-family:var(--poster);color:var(--oro);font-size:2.2vh">${p}</span>
-      <span style="color:var(--suave);letter-spacing:3px;font-size:1.35vh">PIÑAS HOY</span>`;
+    l.innerHTML=`<span style="font-family:var(--poster);color:var(--oro);font-size:calc(2.2 * var(--u))">${p}</span>
+      <span style="color:var(--suave);letter-spacing:3px;font-size:calc(1.35 * var(--u))">PIÑAS HOY</span>`;
   }else{
     l.textContent='LA PIÑA DEL BAR';
   }
@@ -632,7 +660,7 @@ function pintarRecord(){
     caja.style.animation='alerta 1.6s ease-in-out infinite';
     $('#recEt').textContent='RÉCORD DE LA NOCHE';
     const v=cre('div','','SIN RÉCORD');
-    v.style.cssText='font-family:var(--poster);font-size:6.4vh;color:var(--led);letter-spacing:2px;line-height:1;text-shadow:0 0 26px rgba(255,42,42,.7)';
+    v.style.cssText='font-family:var(--poster);font-size:calc(6.4 * var(--u));color:var(--led);letter-spacing:2px;line-height:1;text-shadow:0 0 26px rgba(255,42,42,.7)';
     led1.appendChild(v);
     $('#recNom').textContent='';
     $('#recPie').style.color='var(--led)';
@@ -731,23 +759,23 @@ function pintarRanking(){
      de abajo) no entra en el alto del panel, se vuelve a dibujar mas chico.
      Antes no se medía: los avisos se salían del panel y quedaban pintados
      encima de las cards de la zona baja. */
-  const dibujar=(k)=>{
+  const dibujar=(k,ap)=>{
     f.innerHTML='';
-    f.style.setProperty('--apr',k.toFixed(3));
+    f.style.setProperty('--apr',(ap==null?k:ap).toFixed(3));
     const fs=((2.35-(vis-5)*0.135)*k).toFixed(2);   // el renglón se achica al abrirse más cupos
     const fled=(2.75-(vis-5)*0.14)*k;
     for(let i=0;i<vis;i++){
       const e=lista[i];
       const row=cre('div','fil'+(i===0&&e?' uno':'')+(e?'':' vacio')+(!e&&alerta?' alerta':''));
       const pos=cre('span','pos',String(i+1));
-      pos.style.fontSize=(2*k)+'vh';
+      pos.style.fontSize='calc('+(2*k)+' * var(--u))';
       pos.style.color=e?(i===0?oro:i===1?'#cbd5e1':i===2?'#b45309':'#4b5563'):(alerta?'#FF2A2A':'#3a4150');
       row.appendChild(pos);
       const dat=cre('div','dat');
       const n=cre('span','n',e?e.nombre:(alerta?'LUGAR LIBRE':(fem?'— SÉ LA PRIMERA —':'— TU NOMBRE ACÁ —')));
-      n.style.fontSize=fs+'vh';
+      n.style.fontSize='calc('+fs+' * var(--u))';
       dat.appendChild(n);
-      if(e&&e.ig){const a=cre('span','a',e.ig);a.style.fontSize=(1.25*k)+'vh';dat.appendChild(a);}
+      if(e&&e.ig){const a=cre('span','a',e.ig);a.style.fontSize='calc('+(1.25*k)+' * var(--u))';dat.appendChild(a);}
       row.appendChild(dat);
       if(e)row.appendChild(led(e.score,fled,i===0?oro:led2));
       f.appendChild(row);
@@ -766,8 +794,14 @@ function pintarRanking(){
       f.appendChild(av);
     }
   };
-  dibujar(1);
-  for(let i=1;i<=14 && f.scrollHeight>f.clientHeight+1;i++) dibujar(Math.max(0.42,1-0.05*i));
+  /* Cuando no entra, primero se saca AIRE (el relleno de cada renglon) y
+     recien despues se achica la LETRA. Antes achicaba las dos cosas a la vez:
+     con el ranking lleno los nombres quedaban de la mitad del tamano por un
+     problema de espacio que se resolvia sacando margenes, que nadie lee. */
+  const noEntra=()=>f.scrollHeight>f.clientHeight+1;
+  dibujar(1,1);
+  for(let i=1;i<=8 && noEntra();i++) dibujar(1,Math.max(0.2,1-0.1*i));
+  for(let i=1;i<=14 && noEntra();i++) dibujar(Math.max(0.42,1-0.05*i),0.2);
 }
 setInterval(()=>{if(S.ocupado||S.packsAbierto)return;S.tab=(S.tab+1)%TABS.length;pintarTabs();pintarRanking();},T.tab);
 
@@ -872,26 +906,26 @@ function pintarCard(){
      de dónde, y va abajo. Al revés se leía como un cartel de Instagram. */
   if(d.tituloArriba){
     const t=cre('h2','',d.tituloArriba);
-    t.style.marginBottom='.7vh';
+    t.style.marginBottom='calc(.7 * var(--u))';
     c.appendChild(t);
   }
   if(d.igMarca){
     const w=cre('div','');
-    w.style.cssText='display:inline-flex;align-items:center;gap:.7vh;margin-bottom:.2vh';
-    w.innerHTML='<span style="display:inline-block;width:2.4vh;height:2.4vh">'+igSVG()+'</span>'+
-      '<span style="font-family:\'Grand Hotel\',cursive;font-size:2.8vh;color:#fff;line-height:1">Instagram</span>';
+    w.style.cssText='display:inline-flex;align-items:center;gap:calc(.7 * var(--u));margin-bottom:calc(.2 * var(--u))';
+    w.innerHTML='<span style="display:inline-block;width:calc(2.4 * var(--u));height:calc(2.4 * var(--u))">'+igSVG()+'</span>'+
+      '<span style="font-family:\'Grand Hotel\',cursive;font-size:calc(2.8 * var(--u));color:#fff;line-height:1">Instagram</span>';
     c.appendChild(w);
   }
   const cj=cre('div',''); cj.style.cssText='display:flex;align-items:center;justify-content:center;gap:8px';
   const e1=cre('div','ceja'); e1.style.color=d.color;
   if(d.igCeja){
     /* El ícono acompaña a la palabra, no la reemplaza ni compite con ella. */
-    e1.innerHTML='<span style="display:inline-flex;align-items:center;gap:.6vh">'+
-      '<span style="display:inline-block;width:2.2vh;height:2.2vh">'+igSVG()+'</span>'+
-      '<span style="font-family:\'Grand Hotel\',cursive;font-size:2.6vh;color:#fff;'+
+    e1.innerHTML='<span style="display:inline-flex;align-items:center;gap:calc(.6 * var(--u))">'+
+      '<span style="display:inline-block;width:calc(2.2 * var(--u));height:calc(2.2 * var(--u))">'+igSVG()+'</span>'+
+      '<span style="font-family:\'Grand Hotel\',cursive;font-size:calc(2.6 * var(--u));color:#fff;'+
         'letter-spacing:0;text-transform:none;line-height:1">Instagram</span></span>';
   }else{
-    e1.innerHTML=(d.ig?'<span style="display:inline-block;width:1.9vh;height:1.9vh;vertical-align:-.35vh;margin-right:.5vh">'+igSVG()+'</span>':'')+d.ceja;
+    e1.innerHTML=(d.ig?'<span style="display:inline-block;width:calc(1.9 * var(--u));height:calc(1.9 * var(--u));vertical-align:calc(-.35 * var(--u));margin-right:calc(.5 * var(--u))">'+igSVG()+'</span>':'')+d.ceja;
   }
   if(d.ceja)cj.appendChild(e1);
   if(d.vivo){const v=cre('span','vivo');v.appendChild(cre('i'));v.appendChild(document.createTextNode('AHORA'));cj.appendChild(v);}
@@ -905,7 +939,7 @@ function pintarCard(){
   }
   if(d.mega){
     const m=cre('div','mega',d.mega); m.style.color=d.color;
-    if(d.mega.length>8)m.style.fontSize='3.4vh';       // frases: más chico que un precio
+    if(d.mega.length>8)m.style.fontSize='calc(3.4 * var(--u))';       // frases: más chico que un precio
     c.appendChild(m);
   }
   if(d.destacado||d.precio){
@@ -937,12 +971,18 @@ setInterval(()=>{if(S.ocupado||S.packsAbierto)return;S.card++;pintarCard();},T.c
 function pintarQR(){
   const url=CFG.URL_CARGA||(location.origin+'/m');
   const q=$('#qr'); q.innerHTML='';
-  const sv=qrSVG(url,Math.round(window.innerHeight*.053));
-  if(sv)q.appendChild(sv);
-  const t=cre('div'); t.style.textAlign='center';
+  /* Primero el texto, despues se mide lo que sobra y el QR se dibuja de ese
+     tamano. Antes era una medida fija que dejaba la mitad del recuadro vacio:
+     este es el QR con el que la gente carga su pina, tiene que leerse parado
+     al lado de la maquina, no pegado a la pantalla. */
+  const hueco=cre('div','hueco'); q.appendChild(hueco);
+  const t=cre('div'); t.style.cssText='text-align:center;flex:none';
   t.appendChild(cre('div','t1','TU NOMBRE\nEN PANTALLA')).style.whiteSpace='pre-line';
   t.appendChild(cre('div','t2','ESCANEÁ Y\nCARGÁ TU PIÑA')).style.whiteSpace='pre-line';
   q.appendChild(t);
+  const r=hueco.getBoundingClientRect();
+  const lado=Math.floor(Math.min(r.width,r.height));
+  if(lado>=40){const sv=qrSVG(url,lado);if(sv)hueco.appendChild(sv);}
 }
 
 /* ────────── takeover de precios ────────── */
@@ -952,7 +992,7 @@ function pintarQR(){
 function preciosAhora(){
   const lista=PRECIOS.map(x=>Object.assign({},x));
   if(!esHappy()){
-    lista[0].tag='1 TIRO';
+    lista[0].tag='PARA PROBAR';   // decia "1 TIRO", igual que el titulo de abajo: repetir no suma
     lista[0].color='#9CA3AF';
     lista[0].nota='$2.000 el tiro';
     lista[0].extra='';
@@ -960,20 +1000,44 @@ function preciosAhora(){
   return lista;
 }
 
+/* Blanco sobre amarillo no se lee. El color del texto de cada pastilla sale
+   del brillo real del fondo, no de una excepcion escrita a mano. */
+function textoSobre(hex){
+  const h=String(hex).replace('#','');
+  const r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16);
+  return (0.299*r+0.587*g+0.114*b)>150?'#111':'#fff';
+}
+
 function pintarPacks(){
   const PRECIOS_HOY=preciosAhora();
   const p=$('#packs'); p.innerHTML='';
-  const cab=cre('div'); cab.style.textAlign='center';
-  const f=cre('div',''); f.style.cssText='display:flex;flex-direction:column;align-items:center;gap:1vh';
+  /* Hay que mostrarlo antes de armarlo: mas abajo se mide cuanto espacio
+     sobra en cada tarjeta para dibujar el QR mas grande que entre, y algo
+     oculto mide cero. */
+  p.style.display='flex';
+  /* El logo y el titulo van en una sola linea. Apilados se llevaban un tercio
+     de la pantalla para decir algo que la gente ya sabe, y ese espacio le
+     hace mucha mas falta al QR. */
+  const cab=cre('div'); cab.style.cssText='text-align:center;flex:none';
+  const f=cre('div',''); f.style.cssText='display:flex;align-items:center;justify-content:center;gap:calc(1.6 * var(--u))';
   const im=cre('img'); im.src=$('#logo').src;
-  im.style.cssText='width:11vh;height:11vh;object-fit:contain;animation:respira 3.4s ease-in-out infinite';
+  im.style.cssText='width:calc(6.6 * var(--u));height:calc(6.6 * var(--u));object-fit:contain;animation:respira 3.4s ease-in-out infinite';
   f.appendChild(im);
   const ti=cre('div',''); ti.innerHTML='ELEGÍ TUS <span style="color:var(--rojo)">TIROS</span>';
-  ti.style.cssText='font-family:var(--poster);font-size:8vh;letter-spacing:1.5px;line-height:1;text-align:center';
+  ti.style.cssText='font-family:var(--poster);font-size:calc(5.6 * var(--u));letter-spacing:1.5px;line-height:1;white-space:nowrap';
   f.appendChild(ti); cab.appendChild(f);
   const sub=cre('div','','LA PIÑA DEL BAR');
-  sub.style.cssText='color:var(--suave);font-weight:600;letter-spacing:7px;font-size:1.6vh;margin-top:1%';
+  sub.style.cssText='color:var(--suave);font-weight:600;letter-spacing:7px;font-size:calc(1.5 * var(--u));margin-top:calc(.4 * var(--u))';
   cab.appendChild(sub); p.appendChild(cab);
+  /* El titulo va en una sola linea, pero "ELEGI TUS TIROS" al lado del logo no
+     entra en cualquier pantalla. En vez de elegir un tamano fijo y rezar, se
+     mide y se achica hasta que entra. */
+  const est=getComputedStyle(p);
+  const anchoUtil=p.clientWidth-parseFloat(est.paddingLeft)-parseFloat(est.paddingRight);
+  for(let t=5.6;t>3.2 && f.scrollWidth>anchoUtil;t-=0.2){
+    ti.style.fontSize='calc('+t.toFixed(1)+' * var(--u))';
+  }
+  const porMedir=[];
 
   const grid=cre('div'); grid.style.cssText='flex:1;display:flex;flex-direction:column;gap:4.4%;min-height:0';
   for(let r=0;r<2;r++){
@@ -986,33 +1050,45 @@ function pintarPacks(){
       card.style.boxShadow=`0 0 ${d.hero?46:30}px ${d.hero?'-12':'-22'}px ${d.color}`;
       if(d.hero)card.style.animation='late 2.6s ease-in-out infinite';
       const tag=cre('span','tag',d.tag);
-      tag.style.cssText+=`background:${d.color};color:${d.n===3?'#111':'#fff'}`;
+      tag.style.cssText+=`background:${d.color};color:${textoSobre(d.color)}`;
       card.appendChild(tag);
       card.appendChild(cre('div','cant',`${d.n} ${d.n===1?'TIRO':'TIROS'}`));
       card.appendChild(cre('div','prec',d.precio));
       const nota=cre('div','cu',d.nota); if(d.extra){nota.textContent=d.nota+' · '+d.extra;} card.appendChild(nota);
       const link=CFG.PAGO[d.n];
-      const sv=link?qrSVG(link,Math.round(window.innerHeight*.088)):null;
-      if(sv){
-        /* Un QR quieto en una pantalla es un cuadrito más. Con el barrido
-           de luz encima el ojo lo lee como "esto se usa". */
-        const env=cre('div','qrEnv'); env.appendChild(sv);
-        const br=cre('span','barrido'); br.style.animationDelay=(0.4+(r*2+k)*0.5)+'s';
-        env.appendChild(br); card.appendChild(env);
+      if(link){
+        const hueco=cre('div','hueco'); card.appendChild(hueco);
         card.appendChild(cre('div','esc','ESCANEÁ Y PAGÁ'));
+        porMedir.push({hueco:hueco,link:link,orden:r*2+k});
       }
-      else{const ef=cre('div','esc','EFECTIVO EN LA CAJA');ef.style.padding='2.4vh 0';card.appendChild(ef);}
+      else{const ef=cre('div','esc','EFECTIVO EN LA CAJA');ef.style.padding='calc(2.4 * var(--u)) 0';card.appendChild(ef);}
       fila.appendChild(card);
     }
     grid.appendChild(fila);
   }
   p.appendChild(grid);
   const pie=cre('div',''); pie.style.cssText='text-align:center;border-radius:12px;padding:2% 4%;border:1px solid rgba(255,213,24,.55);background:rgba(255,213,24,.07)';
-  pie.innerHTML='<div style="font-family:var(--poster);font-size:3.2vh;line-height:1">'+
+  pie.innerHTML='<div style="font-family:var(--poster);font-size:calc(2.7 * var(--u));line-height:1;white-space:nowrap">'+
     'EFECTIVO O <span style="color:var(--oro)">QR</span> · MISMO PRECIO</div>'+
-    '<div style="font-family:var(--cuerpo);font-weight:600;font-size:1.6vh;color:var(--suave);'+
-    'letter-spacing:.5px;margin-top:.7vh">El pack de 3 tiros está disponible solo con QR</div>';
+    '<div style="font-family:var(--cuerpo);font-weight:600;font-size:calc(1.5 * var(--u));color:var(--suave);'+
+    'letter-spacing:.5px;margin-top:calc(.6 * var(--u))">El pack de 3 tiros está disponible solo con QR</div>';
   p.appendChild(pie);
+
+  /* Segunda pasada: ya con todo ubicado, cada QR se dibuja del tamano exacto
+     del hueco que le quedo. Antes era una medida fija chica y sobraba lugar
+     alrededor; de lejos, un QR chico no se escanea. */
+  porMedir.forEach(function(t){
+    const r=t.hueco.getBoundingClientRect();
+    const lado=Math.floor(Math.min(r.width,r.height));
+    if(lado<40)return;
+    const sv=qrSVG(t.link,lado);
+    if(!sv)return;
+    /* Un QR quieto en una pantalla es un cuadrito más. Con el barrido
+       de luz encima el ojo lo lee como "esto se usa". */
+    const env=cre('div','qrEnv'); env.appendChild(sv);
+    const br=cre('span','barrido'); br.style.animationDelay=(0.4+t.orden*0.5)+'s';
+    env.appendChild(br); t.hueco.appendChild(env);
+  });
 }
 setInterval(()=>{
   if(S.ocupado||S.packsAbierto)return;
@@ -1039,20 +1115,20 @@ function overRevancha(hit,pos,faltan){
   const gana=pos>0, col=gana?'#FFD518':'#D7252A';
   o.innerHTML=`
     <div style="position:absolute;inset:0;pointer-events:none;background:radial-gradient(120% 70% at 50% 40%,${col}26,transparent 62%)"></div>
-    <div style="color:var(--suave);font-weight:700;letter-spacing:6px;font-size:1.9vh">TU PIÑA</div>
-    <div style="font-family:var(--negra);font-size:5.2vh;letter-spacing:1px;margin-top:2%;line-height:1">${hit.nombre||'ANÓNIMO'}</div>
+    <div style="color:var(--suave);font-weight:700;letter-spacing:6px;font-size:calc(1.9 * var(--u))">TU PIÑA</div>
+    <div style="font-family:var(--negra);font-size:calc(5.2 * var(--u));letter-spacing:1px;margin-top:2%;line-height:1">${hit.nombre||'ANÓNIMO'}</div>
     <div id="ledBig" style="margin:5% 0"></div>
     ${gana
-      ? `<div style="font-family:var(--poster);color:var(--oro);font-size:5.6vh;line-height:1">ENTRASTE #${pos}</div>
-         <div style="font-weight:700;letter-spacing:3px;font-size:2.2vh;margin-top:3%">DE LA NOCHE</div>`
-      : `<div style="font-weight:700;letter-spacing:3px;font-size:2.2vh">TE FALTARON</div>
+      ? `<div style="font-family:var(--poster);color:var(--oro);font-size:calc(5.6 * var(--u));line-height:1">ENTRASTE #${pos}</div>
+         <div style="font-weight:700;letter-spacing:3px;font-size:calc(2.2 * var(--u));margin-top:3%">DE LA NOCHE</div>`
+      : `<div style="font-weight:700;letter-spacing:3px;font-size:calc(2.2 * var(--u))">TE FALTARON</div>
          <div style="display:flex;align-items:baseline;gap:10px;justify-content:center;margin-top:1%">
-           <span style="font-family:var(--poster);color:var(--rojo);font-size:7.2vh;line-height:1">${faltan}</span>
-           <span style="font-family:var(--poster);font-size:3vh">PUNTOS</span></div>
-         <div style="color:var(--suave);font-weight:700;letter-spacing:3px;font-size:1.7vh;margin-top:2%">PARA ENTRAR AL TOP</div>`}
+           <span style="font-family:var(--poster);color:var(--rojo);font-size:calc(7.2 * var(--u));line-height:1">${faltan}</span>
+           <span style="font-family:var(--poster);font-size:calc(3 * var(--u))">PUNTOS</span></div>
+         <div style="color:var(--suave);font-weight:700;letter-spacing:3px;font-size:calc(1.7 * var(--u));margin-top:2%">PARA ENTRAR AL TOP</div>`}
     <div style="margin-top:7%;padding:2.5% 7%;border-radius:999px;border:2px solid var(--oro);
       background:rgba(255,213,24,.1);font-family:var(--poster);color:var(--oro);letter-spacing:2px;
-      font-size:4.6vh;animation:brilla 1.4s ease-in-out infinite">¿OTRA?</div>`;
+      font-size:calc(4.6 * var(--u));animation:brilla 1.4s ease-in-out infinite">¿OTRA?</div>`;
   app.appendChild(o);
   $('#ledBig',o).appendChild(led(hit.score,15,col));
   papeles();
@@ -1065,13 +1141,13 @@ function overRecord(hit,previo){
   o.innerHTML=`
     <div style="position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 42%,rgba(255,213,24,.1),transparent 60%)"></div>
     <div style="display:flex;flex-direction:column;align-items:center;animation:aparece .5s cubic-bezier(.22,1,.36,1)">
-      <img src="${$('#logo').src}" style="width:8.5vh;height:8.5vh;object-fit:contain">
-      <div style="font-family:var(--negra);color:var(--oro);letter-spacing:2px;font-size:4.4vh;margin-top:3%">¡NUEVO RÉCORD!</div>
+      <img src="${$('#logo').src}" style="width:calc(8.5 * var(--u));height:calc(8.5 * var(--u));object-fit:contain">
+      <div style="font-family:var(--negra);color:var(--oro);letter-spacing:2px;font-size:calc(4.4 * var(--u));margin-top:3%">¡NUEVO RÉCORD!</div>
       <div id="ledRec" style="margin:5% 0"></div>
-      <div style="font-family:var(--negra);letter-spacing:2px;font-size:3.6vh">${hit.nombre||'ANÓNIMO'}</div>
-      <div style="color:var(--suave);font-weight:500;letter-spacing:1px;font-size:1.6vh;margin-top:1%">${hit.ig||''}</div>
-      <div style="font-weight:700;color:var(--rojo);letter-spacing:4px;font-size:2vh;margin-top:3%">NUEVO CAMPEÓN DE LA CASA</div>
-      <div style="color:var(--suave);font-weight:500;letter-spacing:2px;font-size:1.6vh;margin-top:3%">FILMALO Y SUBILO A IG</div>
+      <div style="font-family:var(--negra);letter-spacing:2px;font-size:calc(3.6 * var(--u))">${hit.nombre||'ANÓNIMO'}</div>
+      <div style="color:var(--suave);font-weight:500;letter-spacing:1px;font-size:calc(1.6 * var(--u));margin-top:1%">${hit.ig||''}</div>
+      <div style="font-weight:700;color:var(--rojo);letter-spacing:4px;font-size:calc(2 * var(--u));margin-top:3%">NUEVO CAMPEÓN DE LA CASA</div>
+      <div style="color:var(--suave);font-weight:500;letter-spacing:2px;font-size:calc(1.6 * var(--u));margin-top:3%">FILMALO Y SUBILO A IG</div>
     </div>`;
   app.appendChild(o);
   const cont=$('#ledRec',o); let v=previo||0;
@@ -1183,6 +1259,7 @@ window.addEventListener('resize',()=>{pintarQR();});
     const v=document.getElementById('despierto');
     if(v){try{const p=v.play();if(p&&p.catch)p.catch(()=>{});}catch(e){}}
     if(navigator.wakeLock){try{navigator.wakeLock.request('screen');}catch(e){}}
+    try{ac();}catch(e){}  // el sonido de los golpes tambien precisa este gesto
     capa.style.display='none';
   }
   capa.addEventListener('click',empezar);
