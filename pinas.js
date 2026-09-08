@@ -39,25 +39,29 @@ module.exports = function montarPinas(app, ctx) {
   const TOP               = 10;
   const MAX_FOTO_BYTES    = 900 * 1024;
   const DIAS_QUE_GUARDAMOS = 120;
-  const MAX_PREMIOS_NOCHE  = 25;     // techo duro de premios por noche
+  const MAX_PREMIOS_NOCHE  = 12;     // techo duro de premios por noche
   const MAX_TIROS_PREMIO   = 2;      // ningun premio puede soltar mas que esto
 
   // ===== LA RULETA VIVE ACA, NO EN EL CELULAR =====
   // El orden tiene que ser IDENTICO al del array GAJOS de publico/carga.html:
   // el server elige el gajo y el celular solo lo dibuja.
+  // Los premios que CUESTAN plata se recortaron fuerte. El tiro gratis no:
+  // ese no sale del bolsillo (la maquina ya esta prendida) y ademas devuelve
+  // a la persona a la maquina, que es donde vuelve a gastar. Bajar el tiro
+  // gratis seria ahorrar en lo unico que no cuesta y que trae gente.
   const RULETA = [
-    { t: '$100.000',              peso: 0.02,    premio: true },   // 1 cada 5.000
-    { t: 'SEGU\u00cd\nPARTICIPANDO',   peso: 16.0128 },
-    { t: 'COMBO DE\nFERNET',      peso: 0.07,    premio: true },   // 1 cada 1.429
-    { t: 'SEGU\u00cd\nPARTICIPANDO',   peso: 16.0128 },
-    { t: '2 BIRRITAS',            peso: 0.3333,  premio: true },   // 1 cada 300
-    { t: 'SEGU\u00cd\nPARTICIPANDO',   peso: 16.0128 },
-    { t: 'DEVOLUCI\u00d3N\n$2.000',    peso: 0.5,     premio: true },   // 1 cada 200
-    { t: 'SEGU\u00cd\nPARTICIPANDO',   peso: 16.0128 },
-    { t: 'BIRRITA\nGRATIS',       peso: 1,       premio: true },   // 1 cada 100
-    { t: 'SEGU\u00cd\nPARTICIPANDO',   peso: 16.0128 },
-    { t: 'TIRO\nGRATIS',          peso: 2,       premio: true },   // 1 cada 50
-    { t: 'SEGU\u00cd\nPARTICIPANDO',   peso: 16.0128 }
+    { t: '$100.000',              peso: 0.005,   premio: true },   // 1 cada 20.000
+    { t: 'SEGU\u00cd\nPARTICIPANDO',   peso: 16.1300 },
+    { t: 'COMBO DE\nFERNET',      peso: 0.015,   premio: true },   // 1 cada 6.667
+    { t: 'SEGU\u00cd\nPARTICIPANDO',   peso: 16.1300 },
+    { t: '2 BIRRITAS',            peso: 0.1,     premio: true },   // 1 cada 1.000
+    { t: 'SEGU\u00cd\nPARTICIPANDO',   peso: 16.1300 },
+    { t: 'DEVOLUCI\u00d3N\n$2.000',    peso: 0.2,     premio: true },   // 1 cada 500
+    { t: 'SEGU\u00cd\nPARTICIPANDO',   peso: 16.1300 },
+    { t: 'BIRRITA\nGRATIS',       peso: 0.4,     premio: true },   // 1 cada 250
+    { t: 'SEGU\u00cd\nPARTICIPANDO',   peso: 16.1300 },
+    { t: 'TIRO\nGRATIS',          peso: 2.5,     premio: true },   // 1 cada 40
+    { t: 'SEGU\u00cd\nPARTICIPANDO',   peso: 16.1300 }
   ];
   const SEGUI_OTROS = [5, 7, 9, 11];
 
@@ -296,8 +300,14 @@ module.exports = function montarPinas(app, ctx) {
 
     // UN GIRO POR PERSONA POR NOCHE. Las pinas se cargan todas (el ranking
     // las necesita); lo que se usa una sola vez es la ruleta.
+    // Se compara por apodo Y por aparato. Antes solo por apodo: cambiabas el
+    // nombre y volvias a girar, y cada giro extra es una chance real de
+    // premio pago. El aparato no es infalible, pero corta el atajo facil.
+    const disp = limpiar(b.disp, 40);
     const yaGiro = pinas.some(function (p) {
-      return p.giro && p.noche === nocheHoy() && clavePersona(p.apodo) === clavePersona(apodo);
+      return p.giro && p.noche === nocheHoy() &&
+             (clavePersona(p.apodo) === clavePersona(apodo) ||
+              (!!disp && p.disp === disp));
     });
 
     const id = 'p' + ahora.toString(36) + crypto.randomBytes(2).toString('hex');
@@ -315,6 +325,7 @@ module.exports = function montarPinas(app, ctx) {
       score: score,
       foto: foto,
       envio: envio || null,
+      disp: disp || null,        // que aparato la cargo, para el giro por noche
       giro: !yaGiro,
       gajo: null,
       aprobada: !APROBACION_MANUAL,
