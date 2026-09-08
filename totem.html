@@ -247,6 +247,22 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
 <body>
 <div id="marco"><div id="app"></div></div>
 
+<!-- Silk (Fire TV) deja la barra de direcciones a un costado y no hay forma
+     de sacarla sin un gesto del usuario: esta pantalla de arranque pide un
+     solo toque, pide pantalla completa y de paso destraba el video mudo
+     anti-reposo, que en algunos navegadores tambien precisa un gesto. -->
+<div id="arranque" style="position:fixed;inset:0;z-index:99999;
+  background:#050608;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:3vh;cursor:pointer">
+  <div style="font-family:var(--negra);font-size:7vh;color:#fff;
+    letter-spacing:1px">BEER<span style="color:#D7252A">PUNCH</span></div>
+  <div style="font-family:var(--poster);font-size:4vh;color:#FFD518;
+    letter-spacing:2px;text-align:center;line-height:1.3">
+    TOCÁ OK<br>PARA EMPEZAR LA NOCHE</div>
+  <div style="font-family:var(--cuerpo);font-size:1.8vh;color:#8A8A96;
+    letter-spacing:1px">un solo toque &middot; queda listo hasta que cierre el bar</div>
+</div>
+
 <script>
 /* ══════════════════════════════════════════════════════════════
    BEERPUNCH · TÓTEM
@@ -254,7 +270,7 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
    ══════════════════════════════════════════════════════════════ */
 const CFG = {
   API:'',                       // '' = mismo origen. Ej: 'https://beerpunch.onrender.com'
-  ROTAR_90:true,               // true si el TV Box NO rota la salida de video
+  ROTAR_90:true,                // true si el TV Box NO rota la salida de video
   SONIDO:true,
 
   IG:'@beerpunch.mdz',
@@ -514,7 +530,7 @@ app.innerHTML=`
 function medir(){
   const W=window.innerWidth,H=window.innerHeight;
   let w,h;
-  if(CFG.ROTAR_90){ h=Math.min(W,H*9/16); w=h*16/9;
+  if(CFG.ROTAR_90){ h=Math.min(H,W*9/16); w=h*16/9;
     app.style.width=h+'px'; app.style.height=w+'px';
     app.style.transform=`rotate(90deg) translate(${S.qx||0}px,${S.qy||0}px)`;
   }else{ h=Math.min(H,W*16/9); w=h*9/16;
@@ -527,10 +543,33 @@ window.addEventListener('resize',medir); medir();
 /* ─── anti burn-in: 8 h por noche queman el panel ─── */
 setInterval(()=>{S.qx=Math.round((Math.random()-.5)*8);S.qy=Math.round((Math.random()-.5)*8);medir();},T.antiQuema);
 
-/* ─── wake lock: que no se duerma la pantalla ─── */
+/* ─── que el TV Box no se duerma ───
+   Dos cinturones. El moderno (Wake Lock) cuando el navegador lo tiene, y
+   el de toda la vida: un video mudo en loop, que el aparato interpreta
+   como "el tipo esta mirando algo" y no dispara el protector de pantalla
+   ni el apagado. Solo con el Wake Lock, en la practica, igual terminaba
+   saliendo el fondo de pantalla y apagandose despues de un rato. */
 (async function(){let wl=null;
   const pedir=async()=>{try{if(navigator.wakeLock)wl=await navigator.wakeLock.request('screen');}catch(e){}};
   pedir();document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')pedir();});})();
+
+(function(){
+  const v=document.createElement('video');
+  v.id='despierto'; v.muted=true; v.playsInline=true; v.loop=true; v.autoplay=true;
+  v.setAttribute('preload','auto');
+  v.style.cssText='position:fixed;width:2px;height:2px;opacity:0;pointer-events:none;left:0;top:0';
+  v.innerHTML=
+    '<source src="data:video/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAHiEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHYTbuMU6uEElTDZ1OsggEeTbuMU6uEHFO7a1OsggHM7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsirXsYMPQkBNgI1MYXZmNjAuMTYuMTAwV0GNTGF2ZjYwLjE2LjEwMESJiECPQAAAAAAAFlSua8GuAQAAAAAAADjXgQFzxYgTwrkDu/9qGZyBACK1nIN1bmSIgQCGhVZfVlA4g4EBI+ODhDuaygDgibCBELqBEJqBAhJUw2f8c3OgY8CAZ8iaRaOHRU5DT0RFUkSHjUxhdmY2MC4xNi4xMDBzc9ZjwItjxYgTwrkDu/9qGWfIoUWjh0VOQ09ERVJEh5RMYXZjNjAuMzEuMTAyIGxpYnZweGfIoUWjiERVUkFUSU9ORIeTMDA6MDA6MDEuMDAwMDAwMDAwAB9DtnWo54EAo6OBAACAEAIAnQEqEAAQAABHCIWFiJmEiAICAAwNYAD+/6tQgBxTu2uRu4+zgQC3iveBAfGCAZ/wgQM=" type="video/webm">'+
+    '<source src="data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMVbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAj90cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAAAAABAAAAAAG3bWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAQABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABYm1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAASJzdGJsAAAAvnN0c2QAAAAAAAAAAQAAAK5hdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFUxhdmM2MC4zMS4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAANGF2Y0MBZAAK/+EAF2dkAAqs2V7ARAAAAwAEAAADAAg8SJZYAQAGaOvjyyLA/fj4AAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAABYoAAAWKAAAABhzdHRzAAAAAAAAAAEAAAABAABAAAAAABxzdHNjAAAAAAAAAAEAAAABAAAAAQAAAAEAAAAUc3RzegAAAAAAAALFAAAAAQAAABRzdGNvAAAAAAAAAAEAAANFAAAAYnVkdGEAAABabWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAbWRpcmFwcGwAAAAAAAAAAAAAAAAtaWxzdAAAACWpdG9vAAAAHWRhdGEAAAABAAAAAExhdmY2MC4xNi4xMDAAAAAIZnJlZQAAAs1tZGF0AAACrQYF//+p3EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3JlIDE2NCByMzEwOCAzMWUxOWY5IC0gSC4yNjQvTVBFRy00IEFWQyBjb2RlYyAtIENvcHlsZWZ0IDIwMDMtMjAyMyAtIGh0dHA6Ly93d3cudmlkZW9sYW4ub3JnL3gyNjQuaHRtbCAtIG9wdGlvbnM6IGNhYmFjPTEgcmVmPTMgZGVibG9jaz0xOjA6MCBhbmFseXNlPTB4MzoweDExMyBtZT1oZXggc3VibWU9NyBwc3k9MSBwc3lfcmQ9MS4wMDowLjAwIG1peGVkX3JlZj0xIG1lX3JhbmdlPTE2IGNocm9tYV9tZT0xIHRyZWxsaXM9MSA4eDhkY3Q9MSBjcW09MCBkZWFkem9uZT0yMSwxMSBmYXN0X3Bza2lwPTEgY2hyb21hX3FwX29mZnNldD0tMiB0aHJlYWRzPTEgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz0zIGJfcHlyYW1pZD0yIGJfYWRhcHQ9MSBiX2JpYXM9MCBkaXJlY3Q9MSB3ZWlnaHRiPTEgb3Blbl9nb3A9MCB3ZWlnaHRwPTIga2V5aW50PTI1MCBrZXlpbnRfbWluPTEgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD00MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAAQZYiEABX//vfJ78Cm69vfgQ==" type="video/mp4">';
+  document.body.appendChild(v);
+  function darleAlVideo(){const p=v.play();if(p&&p.catch)p.catch(()=>{});}
+  darleAlVideo();
+  /* Si el navegador frena el autoplay hasta que alguien toque algo (no deberia
+     pasar en un TV Box sin mouse, pero por las dudas), lo reintenta al
+     primer toque del control remoto. */
+  ['click','keydown','touchstart'].forEach(ev=>document.addEventListener(ev,darleAlVideo,{once:true}));
+  setInterval(()=>{if(v.paused)darleAlVideo();},60000);
+})();
 
 /* ────────── cabecera ────────── */
 function pintarReloj(){
@@ -1105,6 +1144,36 @@ conectar();
 /* ────────── primer pintado ────────── */
 pintarTabs(); pintarRecord(); pintarRanking(); pintarCard(); pintarQR(); pintarTicker();
 window.addEventListener('resize',()=>{pintarQR();});
+
+/* ────────── pantalla de arranque: pantalla completa + gesto inicial ──────────
+   La API de pantalla completa no se puede pedir sola al cargar (los
+   navegadores la bloquean si no hubo un toque humano), asi que se engancha
+   a esta pantalla: el empleado la toca una vez con el control y de ahi en
+   mas queda a pantalla completa toda la noche. El mismo toque destraba el
+   video mudo anti-reposo en los navegadores que exigen un gesto para eso. */
+(function(){
+  const capa=document.getElementById('arranque');
+  if(!capa)return;
+  /* Esta pantalla es un cuadro aparte, fuera de #app: si no se gira igual
+     que #app, en la TV rotada se leeria de costado justo el cartel que
+     hay que tocar primero. */
+  if(CFG.ROTAR_90)capa.style.transform='rotate(90deg)';
+  function empezar(){
+    const el=document.documentElement;
+    const pedir=el.requestFullscreen||el.webkitRequestFullscreen||
+                el.mozRequestFullScreen||el.msRequestFullscreen;
+    if(pedir){try{pedir.call(el);}catch(e){}}
+    const v=document.getElementById('despierto');
+    if(v){try{const p=v.play();if(p&&p.catch)p.catch(()=>{});}catch(e){}}
+    if(navigator.wakeLock){try{navigator.wakeLock.request('screen');}catch(e){}}
+    capa.style.display='none';
+  }
+  capa.addEventListener('click',empezar);
+  document.addEventListener('keydown',(ev)=>{
+    if(capa.style.display==='none')return;
+    if(ev.key==='Enter'||ev.keyCode===13||ev.keyCode===32)empezar();
+  });
+})();
 </script>
 </body>
 </html>
