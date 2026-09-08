@@ -539,6 +539,17 @@ function medir(){
   }
 }
 window.addEventListener('resize',medir); medir();
+/* Al entrar a pantalla completa, algunos navegadores de TV sacan la barra
+   pero no avisan con un "resize" (o avisan tarde): el cartel quedaba
+   calculado con el tamano de antes, mas chico que la pantalla real, y
+   todo -incluidos los QR- se veia reducido. Se vuelve a medir apenas
+   cambia el modo, y un par de veces mas por si el numero llega tarde. */
+['fullscreenchange','webkitfullscreenchange','mozfullscreenchange','MSFullscreenChange']
+  .forEach(ev=>document.addEventListener(ev,()=>{
+    medir(); pintarQR();
+    setTimeout(()=>{medir();pintarQR();},300);
+    setTimeout(()=>{medir();pintarQR();},1200);
+  }));
 
 /* ─── anti burn-in: 8 h por noche queman el panel ─── */
 setInterval(()=>{S.qx=Math.round((Math.random()-.5)*8);S.qy=Math.round((Math.random()-.5)*8);medir();},T.antiQuema);
@@ -550,8 +561,14 @@ setInterval(()=>{S.qx=Math.round((Math.random()-.5)*8);S.qy=Math.round((Math.ran
    ni el apagado. Solo con el Wake Lock, en la practica, igual terminaba
    saliendo el fondo de pantalla y apagandose despues de un rato. */
 (async function(){let wl=null;
-  const pedir=async()=>{try{if(navigator.wakeLock)wl=await navigator.wakeLock.request('screen');}catch(e){}};
-  pedir();document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')pedir();});})();
+  const pedir=async()=>{try{if(navigator.wakeLock)wl=await navigator.wakeLock.request('screen');else return;
+    wl.addEventListener('release',()=>{wl=null;});}catch(e){}};
+  pedir();
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&!wl)pedir();});
+  /* En un TV Box sin mouse/teclado puede no disparar nunca un cambio de
+     visibilidad, asi que ademas se vuelve a pedir cada tanto por las dudas
+     de que el navegador lo haya soltado solo sin avisar. */
+  setInterval(()=>{if(!wl)pedir();},120000);})();
 
 (function(){
   const v=document.createElement('video');
