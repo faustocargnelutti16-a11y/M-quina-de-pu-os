@@ -1591,27 +1591,66 @@ window.addEventListener('resize',()=>{pintarQR();});
      que #app, en la TV rotada se leeria de costado justo el cartel que
      hay que tocar primero. */
   if(CFG.ROTAR_90)capa.style.transform='rotate(90deg)';
+
+  const arranco=Date.now();
+  let pidiendo=false;
+  const enPantallaCompleta=()=>!!(document.fullscreenElement||document.webkitFullscreenElement||
+                                  document.mozFullScreenElement||document.msFullscreenElement);
+  const esconder=()=>{capa.style.display='none';};
+
   function empezar(){
+    if(pidiendo)return;
+    /* Sonido y video se destraban igual: no molestan y si el gesto era de
+       verdad, quedan listos. */
+    const v=document.getElementById('despierto');
+    if(v){try{v.muted=false;v.volume=0.001;const p=v.play();
+      if(p&&p.catch)p.catch(()=>{v.muted=true;v.play().catch(()=>{});});}catch(e){}}
+    if(navigator.wakeLock){try{navigator.wakeLock.request('screen');}catch(e){}}
+    try{ac();sonidoPrueba();}catch(e){}
+
     const el=document.documentElement;
     const pedir=el.requestFullscreen||el.webkitRequestFullscreen||
                 el.mozRequestFullScreen||el.msRequestFullscreen;
-    if(pedir){try{pedir.call(el);}catch(e){}}
-    const v=document.getElementById('despierto');
-    /* Sin mute, pero con el volumen casi en cero: nadie lo escucha y el
-       navegador lo cuenta como reproduccion real. El mute solo se puede
-       sacar despues de un gesto de la persona, y este toque lo es. */
-    if(v){try{v.muted=false;v.volume=0.001;const p=v.play();if(p&&p.catch)p.catch(()=>{v.muted=true;v.play().catch(()=>{});});}catch(e){}}
-    if(navigator.wakeLock){try{navigator.wakeLock.request('screen');}catch(e){}}
-    try{ac();sonidoPrueba();}catch(e){}  // ademas de destrabarlo, avisa si el aparato tiene audio
-    capa.style.display='none';
+    /* Si el navegador no tiene pantalla completa, no tiene sentido dejar el
+       cartel puesto para siempre: se saca y listo. */
+    if(!pedir){esconder();return;}
+
+    /* EL CARTEL SOLO SE VA SI LA PANTALLA COMPLETA ENTRO DE VERDAD. Antes se
+       escondia siempre: si el navegador rechazaba el pedido (porque el evento
+       no venia de una persona), el cartel desaparecia igual y nadie podia
+       volver a intentarlo. Asi quedaba la barra del costado toda la noche. */
+    pidiendo=true;
+    let p=null;
+    try{p=pedir.call(el);}catch(e){}
+    if(p&&p.then){
+      p.then(function(){pidiendo=false;esconder();},
+             function(){pidiendo=false;});
+    }else{
+      setTimeout(function(){pidiendo=false;if(enPantallaCompleta())esconder();},400);
+    }
   }
-  /* Cualquier tecla y cualquier toque, en cualquier parte. Antes solo valia
-     OK o espacio: si la persona apretaba una flecha o tocaba al costado del
-     cartel, no pasaba nada y parecia colgado. Lo unico que hace falta es un
-     gesto humano, no uno en particular. */
-  ['click','pointerdown','touchstart','keydown'].forEach(ev=>{
-    document.addEventListener(ev,()=>{ if(capa.style.display!=='none')empezar(); });
+
+  /* Cualquier tecla y cualquier toque, en cualquier parte: lo unico que hace
+     falta es un gesto humano, no uno en particular. Se ignora el primer
+     segundo, porque ahi el navegador a veces dispara eventos por su cuenta y
+     esos no cuentan como gesto. */
+  ['click','pointerdown','touchstart','keydown'].forEach(function(ev){
+    document.addEventListener(ev,function(){
+      if(capa.style.display==='none')return;
+      if(Date.now()-arranco<1200)return;
+      empezar();
+    });
   });
+
+  /* Si el navegador suelta la pantalla completa (pasa cuando el aparato se
+     duerme y vuelve), reaparece el cartel para poder recuperarla con un
+     toque, en vez de quedarse con la barra puesta hasta que alguien recargue. */
+  ['fullscreenchange','webkitfullscreenchange','mozfullscreenchange','MSFullscreenChange']
+    .forEach(function(ev){
+      document.addEventListener(ev,function(){
+        if(!enPantallaCompleta()&&capa.style.display==='none')capa.style.display='flex';
+      });
+    });
 })();
 </script>
 </body>
