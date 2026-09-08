@@ -193,12 +193,16 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
 .pk svg{background:#fff;border-radius:8px;display:block}
 .pk .esc{color:var(--suave);font-weight:600;letter-spacing:2px;font-size:calc(1.25 * var(--u))}
 @keyframes late{0%,100%{transform:none}50%{transform:scale(1.03)}}
-.qrEnv{position:relative;border-radius:9px;overflow:hidden;animation:latQR 2.8s ease-in-out infinite}
-@keyframes latQR{0%,100%{transform:scale(1)}50%{transform:scale(1.045)}}
+.qrEnv{position:relative;border-radius:9px;overflow:hidden}
 .barrido{position:absolute;inset:0;pointer-events:none;
   background:linear-gradient(105deg,transparent 34%,rgba(255,255,255,.85) 50%,transparent 66%);
-  animation:barre 2.8s ease-in-out infinite}
-@keyframes barre{0%{transform:translateX(-150%)}55%,100%{transform:translateX(160%)}}
+  transform:translateX(-150%)}
+/* Los cuatro barridos corrian a la vez y encima arrancaban justo cuando la
+   pantalla estaba entrando: en un aparato flojo eso es el tironeo del
+   principio. Ahora barre uno por vez y recien cuando termino de aparecer. */
+.pk{transition:transform .45s cubic-bezier(.22,1,.36,1),box-shadow .45s ease}
+.pk.foco{transform:scale(1.045);z-index:2}
+@keyframes barre{0%{transform:translateX(-150%)}100%{transform:translateX(160%)}}
 
 /* El puño no está quieto: respira, y cada tanto pega.
    perspective + rotateX hacen que venga de atrás hacia adelante. */
@@ -405,9 +409,17 @@ function qrMatrix(txt){
   return out;
 }
 const cacheQR=new Map();
+const cacheDibujo=new Map();
 function qrSVG(texto,px,quiet){
   quiet=quiet==null?3:quiet;
   if(!texto)return null;
+  /* Dibujar un QR de Mercado Pago son miles de cuadraditos. La pantalla de
+     precios se arma cada un minuto y siempre con los mismos cuatro: se
+     guarda el dibujo terminado y despues solo se clona, que es instantaneo.
+     En un aparato flojo esto es la diferencia entre entrar tironeando o no. */
+  const llave=texto+'|'+px+'|'+quiet;
+  const guardado=cacheDibujo.get(llave);
+  if(guardado)return guardado.cloneNode(true);
   let m=cacheQR.get(texto);
   if(m===undefined){try{m=qrMatrix(texto);}catch(e){m=null;}cacheQR.set(texto,m);}
   if(!m)return null;
@@ -426,7 +438,9 @@ function qrSVG(texto,px,quiet){
   s.setAttribute('viewBox',`0 0 ${lado} ${lado}`);s.setAttribute('width',lado);s.setAttribute('height',lado);
   const p=document.createElementNS('http://www.w3.org/2000/svg','path');
   p.setAttribute('d',d.join(''));p.setAttribute('fill','#000');p.setAttribute('shape-rendering','crispEdges');
-  s.appendChild(p);return s;
+  s.appendChild(p);
+  if(cacheDibujo.size<24)cacheDibujo.set(llave,s.cloneNode(true));
+  return s;
 }
 
 /* ────────── dígitos LED de 7 segmentos ────────── */
@@ -523,6 +537,39 @@ function ticSonido(){
   g.gain.setValueAtTime(.11,a.currentTime);
   g.gain.exponentialRampToValueAtTime(.0001,a.currentTime+.05);
   o.connect(g).connect(a.destination);o.start();o.stop(a.currentTime+.06);
+}
+
+/* Llamada de atencion para la pantalla de precios. Tres notas que suben,
+   con timbre de metal (sierra filtrada), cortas. Es un "mira para aca", no
+   una cancion: en un bar con musica propia, un sonido corto y distinto se
+   escucha; una melodia de fondo solo se pelea con la musica del lugar. */
+function llamadaSonido(){
+  const a=ac();if(!a)return;
+  const t=a.currentTime;
+  [[523,0,.16],[659,.13,.16],[988,.26,.5]].forEach(([hz,d,dur])=>{
+    const o=a.createOscillator(),g=a.createGain(),f=a.createBiquadFilter();
+    o.type='sawtooth';o.frequency.value=hz;
+    f.type='lowpass';f.frequency.setValueAtTime(5200,t+d);
+    f.frequency.exponentialRampToValueAtTime(1400,t+d+dur);
+    g.gain.setValueAtTime(.0001,t+d);
+    g.gain.exponentialRampToValueAtTime(.34,t+d+.02);
+    g.gain.exponentialRampToValueAtTime(.0001,t+d+dur);
+    o.connect(f).connect(g).connect(a.destination);o.start(t+d);o.stop(t+d+dur+.02);
+  });
+}
+
+/* El "tac" del foco que recorre los packs. Sube de tono de tarjeta en
+   tarjeta, asi la vuelta entera se escucha como una frase y no como cuatro
+   ruidos sueltos. Bajito: el que manda es el sonido de entrada. */
+function tacSonido(i){
+  const a=ac();if(!a)return;
+  const t=a.currentTime, hz=[587,698,880,1047][i%4];
+  const o=a.createOscillator(),g=a.createGain();
+  o.type='triangle';o.frequency.value=hz;
+  g.gain.setValueAtTime(.0001,t);
+  g.gain.exponentialRampToValueAtTime(.2,t+.012);
+  g.gain.exponentialRampToValueAtTime(.0001,t+.26);
+  o.connect(g).connect(a.destination);o.start(t);o.stop(t+.28);
 }
 
 /* Campana de ring de boxeo: es el sonido que corta una conversación. Va solo
@@ -1126,6 +1173,7 @@ function textoSobre(hex){
   return (0.299*r+0.587*g+0.114*b)>150?'#111':'#fff';
 }
 
+let focoReloj=null;
 function pintarPacks(){
   const PRECIOS_HOY=preciosAhora();
   const p=$('#packs'); p.innerHTML='';
@@ -1195,6 +1243,29 @@ function pintarPacks(){
   /* Segunda pasada: ya con todo ubicado, cada QR se dibuja del tamano exacto
      del hueco que le quedo. Antes era una medida fija chica y sobraba lugar
      alrededor; de lejos, un QR chico no se escanea. */
+  /* Un foco que recorre los packs de a uno: la tarjeta se agranda, le pasa
+     el barrido de luz por encima y suena su nota. Antes los cuatro barridos
+     corrian juntos y en el aparato eso trababa la entrada; de a uno pesa la
+     cuarta parte y encima guia la mirada de una tarjeta a la otra. */
+  if(focoReloj){clearInterval(focoReloj);focoReloj=null;}
+  setTimeout(function(){
+    const tarjetas=[].slice.call(p.querySelectorAll('.pk'));
+    if(!tarjetas.length)return;
+    let i=-1;
+    const mover=function(){
+      tarjetas.forEach(c=>c.classList.remove('foco'));
+      i=(i+1)%tarjetas.length;
+      const c=tarjetas[i];
+      c.classList.add('foco');
+      const br=c.querySelector('.barrido');
+      if(br){br.style.animation='none';void br.offsetWidth;
+             br.style.animation='barre 2.2s ease-in-out';}
+      tacSonido(i);
+    };
+    mover();
+    focoReloj=setInterval(mover,2400);
+  },600);
+
   porMedir.forEach(function(t){
     const r=t.hueco.getBoundingClientRect();
     const lado=Math.floor(Math.min(r.width,r.height));
@@ -1204,7 +1275,7 @@ function pintarPacks(){
     /* Un QR quieto en una pantalla es un cuadrito más. Con el barrido
        de luz encima el ojo lo lee como "esto se usa". */
     const env=cre('div','qrEnv'); env.appendChild(sv);
-    const br=cre('span','barrido'); br.style.animationDelay=(0.4+t.orden*0.5)+'s';
+    const br=cre('span','barrido');
     env.appendChild(br); t.hueco.appendChild(env);
   });
 }
@@ -1212,7 +1283,9 @@ setInterval(()=>{
   if(S.ocupado||S.packsAbierto)return;
   S.packsAbierto=true; pintarPacks();
   $('#packs').style.display='flex';
-  setTimeout(()=>{$('#packs').style.display='none';S.packsAbierto=false;},T.packsDura);
+  llamadaSonido();
+  setTimeout(()=>{$('#packs').style.display='none';S.packsAbierto=false;
+    if(focoReloj){clearInterval(focoReloj);focoReloj=null;}},T.packsDura);
 },T.packsCada);
 
 /* ────────── overlays ────────── */
@@ -1532,10 +1605,12 @@ window.addEventListener('resize',()=>{pintarQR();});
     try{ac();sonidoPrueba();}catch(e){}  // ademas de destrabarlo, avisa si el aparato tiene audio
     capa.style.display='none';
   }
-  capa.addEventListener('click',empezar);
-  document.addEventListener('keydown',(ev)=>{
-    if(capa.style.display==='none')return;
-    if(ev.key==='Enter'||ev.keyCode===13||ev.keyCode===32)empezar();
+  /* Cualquier tecla y cualquier toque, en cualquier parte. Antes solo valia
+     OK o espacio: si la persona apretaba una flecha o tocaba al costado del
+     cartel, no pasaba nada y parecia colgado. Lo unico que hace falta es un
+     gesto humano, no uno en particular. */
+  ['click','pointerdown','touchstart','keydown'].forEach(ev=>{
+    document.addEventListener(ev,()=>{ if(capa.style.display!=='none')empezar(); });
   });
 })();
 </script>
