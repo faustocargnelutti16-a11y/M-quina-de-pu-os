@@ -388,6 +388,18 @@ module.exports = function montarPinas(app, ctx) {
     });
     emitir('estado', nuevo);
 
+    // La ruleta tambien sale en el totem. Girarla en la palma de la mano no
+    // la ve nadie; en la pantalla la mira el bar entero, y el que mira es el
+    // que despues compra. Solo cuando de verdad giro (gajo -1 = ya giro hoy).
+    if (gajo >= 0) {
+      emitir('ruleta', {
+        nombre: apodo,
+        gajo: gajo,
+        gano: !!(g && g.premio),
+        texto: RULETA[gajo].t.replace(/\n/g, ' ')
+      });
+    }
+
     log('PI\u00d1A', apodo + ' ' + score + (esRecord ? ' R\u00c9CORD' : '') + (puesto ? ' (#' + puesto + ')' : ''));
 
     if (esRecord && previo > 0) {
