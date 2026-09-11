@@ -1849,6 +1849,16 @@ app.get('/admin', function (req, res) {
 '</div></div>' +
 
 '<div class="seccion">' +
+'<h2 class="titulo">Pantallas de la noche</h2>' +
+'<div class="botones">' +
+'<a class="b bien ancho" href="/vivo' + c + '">El t&oacute;tem EN VIVO (para grabar)</a>' +
+'<a class="b" href="/premios' + c + '">Premios &middot; la caja</a>' +
+'<a class="b" href="/fotos' + c + '">Fotos del display</a>' +
+'<a class="b" href="/metricas' + c + '">M&eacute;tricas</a>' +
+'<a class="b" href="/probar' + c + '">Probar</a>' +
+'</div></div>' +
+
+'<div class="seccion">' +
 '<h2 class="titulo">Controles</h2>' +
 '<div class="botones">' +
 '<a class="b bien ancho" href="/gratis' + c + '">Dar un tiro gratis</a>' +
@@ -2122,6 +2132,11 @@ app.get('/panel', function (req, res) {
     '<div class="fila"><span>Tiros vendidos</span><b>' + r.fichas + '</b></div>' +
     '<div class="fila"><span>Operaciones</span><b>' + r.operaciones + '</b></div>' +
     '<a class="btn gris" href="/caja">Ver caja detallada</a></div>' +
+
+    '<div class="box"><h2>Pantallas de la noche</h2>' +
+    '<a class="btn" href="/vivo' + c + '">El t&oacute;tem EN VIVO (para grabar)</a>' +
+    '<a class="btn" href="/premios' + c + '">Premios &middot; la caja</a>' +
+    '<a class="btn" href="/probar' + c + '">Probar</a></div>' +
 
     '<div class="box"><h2>Otros</h2>' +
     '<a class="btn" href="/gratis' + c + '">Dar 1 tiro gratis</a>' +
