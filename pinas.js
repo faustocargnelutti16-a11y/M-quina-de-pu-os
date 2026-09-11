@@ -42,6 +42,31 @@ module.exports = function montarPinas(app, ctx) {
   const MAX_PREMIOS_NOCHE  = 12;     // techo duro de premios por noche
   const MAX_TIROS_PREMIO   = 2;      // ningun premio puede soltar mas que esto
 
+  // ===== EL REY DE LA NOCHE (el premio de las 3) =====
+  // A la hora que diga aca, el que quedo primero en el ranking de la noche se
+  // lleva un premio. No es azar: es aguantar. Sirve para que el que va
+  // ganando a las 12 no se vaya, y para que el que esta segundo compre otra
+  // ficha a las 2:40. Todo lo que hay que tocar esta en este bloque.
+  const REY = {
+    premio:    '1 BIRRITA',   // el mismo texto que ya promete el totem
+    minPersonas: 3,           // hacen falta al menos 3 PERSONAS distintas en el ranking
+    reina:     true,          // ademas del rey, la mejor mujer (el totem ya lo promete)
+    minMujeres: 3,            // y otras 3 en el de mujeres para que haya reina
+    premioReina: '1 BIRRITA',
+    anuncioCada: 4 * 60000,   // cada cuanto lo vuelve a cantar el totem
+    anuncios:  12             // 12 x 4 min = los primeros 45 min despues de la hora
+  };
+
+  /* La hora tiene que ser EXACTAMENTE la misma que el totem viene contando
+     toda la noche ("PREMIO A LAS 3 AM - FALTAN 2H 15M"). El totem la calcula
+     asi: jueves, viernes y sabado a la madrugada se entrega a las 4; el resto
+     de los dias, a las 3. Si aca pusieramos 3 fijo, un sabado se coronaria al
+     rey una hora antes de lo que el propio cartel anuncio. */
+  function horaDeEntrega(d) {
+    const dia = d.getHours() < 6 ? (d.getDay() + 6) % 7 : d.getDay();
+    return (dia === 4 || dia === 5 || dia === 6) ? 4 : 3;
+  }
+
   // ===== LA RULETA VIVE ACA, NO EN EL CELULAR =====
   // El orden tiene que ser IDENTICO al del array GAJOS de publico/carga.html:
   // el server elige el gajo y el celular solo lo dibuja.
@@ -199,9 +224,149 @@ module.exports = function montarPinas(app, ctx) {
       historico: mejorPorPersona(todas),
       record:    record ? { score: record.score, nombre: record.apodo } : { score: 0, nombre: null },
       pinas:     dela.length,
+      // Si ya se corono al rey, viaja en el estado: asi el totem lo sigue
+      // mostrando aunque se reinicie o se corte la conexion a las 3:05.
+      // El CODIGO no viaja: en la pantalla lo lee cualquiera.
+      rey:       reyDeLaNoche(hoy),
+      reina:     coronadoDe(hoy, 'reina'),
       ts: Date.now()
     };
   }
+
+  function coronadoDe(noche, tipo) {
+    const r = premios.find(function (p) { return p.tipo === tipo && p.noche === noche; });
+    return r ? { nombre: r.apodo, score: r.score || 0, premio: r.premio,
+                 entregado: !!r.entregado, ts: r.ts } : null;
+  }
+  function reyDeLaNoche(noche) { return coronadoDe(noche, 'rey'); }
+
+  // Codigo de 4 digitos que no choque con otro vivo de la misma noche.
+  function nuevoCodigo() {
+    const hoy = nocheHoy();
+    const usados = {};
+    premios.forEach(function (p) { if (p.noche === hoy) usados[p.codigo] = 1; });
+    let cod = null, intentos = 0;
+    do { cod = String(crypto.randomInt(1000, 10000)); intentos++; }
+    while (usados[cod] && intentos < 50);
+    return cod;
+  }
+
+  // ===== CORONACION =====
+  // Se llama sola a la hora del premio. Es idempotente: si ya hay rey de esta
+  // noche no hace nada, asi que no importa si el reloj la llama dos veces ni
+  // si el server se reinicia justo a las 3.
+  // Cuanta gente distinta hay en una lista de pinas.
+  function personasDe(lista) {
+    const k = {};
+    lista.forEach(function (p) { k[clavePersona(p.apodo)] = 1; });
+    return Object.keys(k).length;
+  }
+
+  // El mejor puntaje de la lista. Si empatan, gana el que lo hizo PRIMERO:
+  // llego antes y el otro tuvo toda la noche para superarlo.
+  function mejorDe(lista) {
+    let campeon = null;
+    lista.forEach(function (p) {
+      if (!campeon || p.score > campeon.score ||
+          (p.score === campeon.score && p.ts < campeon.ts)) campeon = p;
+    });
+    return campeon;
+  }
+
+  function anotarCoronado(tipo, campeon, textoPremio, hoy) {
+    const premio = {
+      id: 'r' + Date.now().toString(36) + crypto.randomBytes(2).toString('hex'),
+      codigo: nuevoCodigo(),
+      premio: textoPremio,
+      apodo: campeon.apodo,
+      score: campeon.score,
+      ts: Date.now(),
+      noche: hoy,
+      tipo: tipo,
+      entregado: false,
+      entregadoTs: null,
+      pina: campeon.id,
+      disp: campeon.disp || null
+    };
+    premios.push(premio);
+    return premio;
+  }
+
+  function coronarRey() {
+    const hoy = nocheHoy();
+    if (reyDeLaNoche(hoy)) return null;
+
+    const dela = pinas.filter(function (p) { return visible(p) && p.noche === hoy; });
+    // Se cuentan PERSONAS, no pinas: uno solo que compra ocho tiros no hace
+    // una competencia, y un premio que se gana sin competencia no se gana.
+    const cuantos = personasDe(dela);
+    if (cuantos < REY.minPersonas) {
+      log('REY', 'noche floja (' + cuantos + (cuantos === 1 ? ' persona' : ' personas') +
+          ', hacen falta ' + REY.minPersonas + '): no se corona a nadie');
+      return null;
+    }
+
+    const campeon = mejorDe(dela);
+    if (!campeon) return null;
+    const premio = anotarCoronado('rey', campeon, REY.premio, hoy);
+
+    // La reina: el totem tiene una pestana de mujeres que promete su propia
+    // birrita toda la noche. Si no se entregara, esa pestana estaria
+    // prometiendo algo que no existe. Si la mejor mujer YA es la campeona
+    // general, no se le dan dos birras: es la misma persona.
+    let reina = null;
+    if (REY.reina) {
+      const mujeres = dela.filter(function (p) { return p.sexo === 'F'; });
+      const mejorM = mejorDe(mujeres);
+      if (mejorM && personasDe(mujeres) >= REY.minMujeres &&
+          clavePersona(mejorM.apodo) !== clavePersona(campeon.apodo)) {
+        reina = anotarCoronado('reina', mejorM, REY.premioReina, hoy);
+      }
+    }
+
+    guardar();
+
+    log('REY DE LA NOCHE', campeon.apodo + ' con ' + campeon.score +
+        ' \u00b7 ' + premio.premio + ' \u00b7 c\u00f3digo ' + premio.codigo);
+    if (reina) log('REINA DE LA NOCHE', reina.apodo + ' con ' + reina.score +
+                   ' \u00b7 ' + reina.premio + ' \u00b7 c\u00f3digo ' + reina.codigo);
+
+    avisar('BPK - Se entrega el premio',
+           'Rey: ' + campeon.apodo + ' (' + campeon.score + ') c\u00f3digo ' + premio.codigo +
+           (reina ? '\nReina: ' + reina.apodo + ' (' + reina.score + ') c\u00f3digo ' + reina.codigo : '') +
+           '\nEst\u00e1n en el panel de premios.', true);
+
+    emitir('estado', estado());
+    anunciarRey(premio, reina, 0);
+    return premio;
+  }
+
+  // El totem lo canta varias veces: a las 3 en punto media barra esta mirando
+  // para otro lado. Una sola vez es lo mismo que ninguna.
+  function anunciarRey(premio, reina, vuelta) {
+    if (vuelta >= REY.anuncios) return;
+    if (nocheHoy() !== premio.noche) return;   // ya es otra noche, se corta
+    emitir('rey', {
+      nombre: premio.apodo,
+      score: premio.score,
+      premio: premio.premio,
+      reina: reina ? { nombre: reina.apodo, score: reina.score, premio: reina.premio } : null,
+      vuelta: vuelta
+    });
+    setTimeout(function () { anunciarRey(premio, reina, vuelta + 1); }, REY.anuncioCada);
+  }
+
+  // Un reloj cada 30 s en vez de un setTimeout largo: si el server se
+  // reinicia a las 2:59 el timeout se habria perdido y no se coronaba a nadie.
+  setInterval(function () {
+    try {
+      const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+      const min = d.getHours() * 60 + d.getMinutes();
+      const obj = horaDeEntrega(d) * 60;
+      // Ventana de 20 min: cubre un reinicio o un deploy justo a esa hora.
+      if (min >= obj && min < obj + 20) coronarRey();
+    } catch (e) { rutina('PINAS', 'reloj del rey: ' + e.message); }
+  }, 30000);
 
   // ===== CANAL EN VIVO HACIA EL TOTEM =====
   const clientes = new Set();
@@ -228,11 +393,40 @@ module.exports = function montarPinas(app, ctx) {
   // Latido: mantiene viva la conexion con el totem toda la noche.
   setInterval(function () { emitir('ping', { t: Date.now() }); }, 25000);
 
+  /* Cambio de noche.
+     El ranking de la noche se arma filtrando por fecha, asi que el servidor
+     siempre contesta bien. El problema era otro: el totem solo se entera de
+     algo cuando pasa algo. Si a las 12 del mediodia arranca la noche nueva y
+     nadie carga una pina hasta las 8, el totem se queda ocho horas mostrando
+     el ranking de anoche como si fuera el de hoy. Ahora, cuando cambia la
+     fecha, el servidor avisa solo y la tabla queda en blanco. */
+  let nocheEnCurso = nocheHoy();
+  setInterval(function () {
+    const ahora = nocheHoy();
+    if (ahora === nocheEnCurso) return;
+    nocheEnCurso = ahora;
+    log('NOCHE NUEVA', 'arranca la noche del ' + ahora + ': el ranking vuelve a cero');
+    emitir('estado', estado());
+  }, 30000);
+
   app.get('/api/estado', function (req, res) { res.json(estado()); });
 
   // ===== FOTOS =====
   // Van a disco, no adentro del JSON: una foto en base64 dentro del archivo
   // de pinas lo haria pesar megas y ralentizaria cada guardado.
+  // Huella de la foto: si dos pinas traen exactamente la misma imagen, es la
+  // misma foto subida dos veces. La foto es la unica prueba del puntaje, asi
+  // que si vale dos veces no prueba nada. Esto NO detecta una foto nueva del
+  // mismo display (son bytes distintos), pero corta el caso facil: guardar
+  // una foto buena y volver a mandarla.
+  function huellaFoto(dataURL) {
+    try {
+      const m = /^data:image\/(?:jpeg|jpg|png|webp);base64,(.+)$/i.exec(String(dataURL || ''));
+      if (!m) return null;
+      return crypto.createHash('sha256').update(m[1]).digest('hex').slice(0, 32);
+    } catch (e) { return null; }
+  }
+
   function guardarFoto(id, dataURL) {
     if (!persistenciaOk || !dataURL) return null;
     try {
@@ -298,6 +492,37 @@ module.exports = function montarPinas(app, ctx) {
       }
     }
 
+    // Esta foto ya se uso? Se chequea despues del control de reintento por
+    // "envio" y antes de crear la pina.
+    const huella = huellaFoto(b.foto);
+    if (huella) {
+      const yaEsta = pinas.find(function (p) { return p.huella === huella; });
+      if (yaEsta) {
+        // Si es la misma persona hace un ratito, no fue trampa: se le corto la
+        // red, recargo y volvio a mandar. Se le devuelve lo de la primera vez.
+        // Un reintento de verdad viene con el MISMO nombre: la persona no
+        // cambia de apodo porque se le corto la red. Si el nombre cambio,
+        // no es un reintento, es la misma foto usada para otra pina.
+        const dispAhora = limpiar(b.disp, 40);
+        const mismoDuenio = clavePersona(yaEsta.apodo) === clavePersona(apodo) &&
+                            (!dispAhora || !yaEsta.disp || yaEsta.disp === dispAhora);
+        if (mismoDuenio && (ahora - yaEsta.ts) < 3 * 60 * 1000) {
+          const pr0 = premios.find(function (x) { return x.pina === yaEsta.id; });
+          return res.json({
+            ok: true, repetida: true,
+            gajo: (typeof yaEsta.gajo === 'number') ? yaEsta.gajo : -1,
+            premio: pr0 ? pr0.premio : null,
+            codigo: pr0 ? pr0.codigo : null,
+            puesto: 0, esRecord: false
+          });
+        }
+        log('FOTO REPETIDA', apodo + ' mando una foto que ya habia cargado ' + yaEsta.apodo);
+        return res.status(409).json({
+          error: 'Esa foto ya se us\u00f3 para cargar otra pi\u00f1a. Sacale una foto nueva al display.'
+        });
+      }
+    }
+
     // UN GIRO POR PERSONA POR NOCHE. Las pinas se cargan todas (el ranking
     // las necesita); lo que se usa una sola vez es la ruleta.
     // Se compara por apodo Y por aparato. Antes solo por apodo: cambiabas el
@@ -326,6 +551,7 @@ module.exports = function montarPinas(app, ctx) {
       foto: foto,
       envio: envio || null,
       disp: disp || null,        // que aparato la cargo, para el giro por noche
+      huella: huella || null,    // para que la misma foto no entre dos veces
       giro: !yaGiro,
       gajo: null,
       aprobada: !APROBACION_MANUAL,
@@ -363,28 +589,22 @@ module.exports = function montarPinas(app, ctx) {
     const g = gajo >= 0 ? RULETA[gajo] : null;
 
     if (g && g.premio) {
-      {
-        nombrePremio = g.t.replace(/\n/g, ' ');
-        // Codigo que no se repita con otro vivo de la misma noche.
-        const hoyCod = nocheHoy();
-        const usados = {};
-        premios.forEach(function (p) { if (p.noche === hoyCod) usados[p.codigo] = 1; });
-        let intentos = 0;
-        do { codigo = String(crypto.randomInt(1000, 10000)); intentos++; }
-        while (usados[codigo] && intentos < 50);
-        premios.push({
-          id: 'x' + ahora.toString(36) + crypto.randomBytes(2).toString('hex'),
-          codigo: codigo,
-          premio: nombrePremio,
-          apodo: apodo,
-          ts: ahora,
-          noche: nocheHoy(),
-          entregado: false,
-          entregadoTs: null,
-          pina: id
-        });
-        log('PREMIO', nombrePremio + ' para ' + apodo + ' \u00b7 c\u00f3digo ' + codigo);
-      }
+      nombrePremio = g.t.replace(/\n/g, ' ');
+      codigo = nuevoCodigo();
+      premios.push({
+        id: 'x' + ahora.toString(36) + crypto.randomBytes(2).toString('hex'),
+        codigo: codigo,
+        premio: nombrePremio,
+        apodo: apodo,
+        ts: ahora,
+        noche: nocheHoy(),
+        tipo: 'ruleta',
+        entregado: false,
+        entregadoTs: null,
+        pina: id,
+        disp: disp || null
+      });
+      log('PREMIO', nombrePremio + ' para ' + apodo + ' \u00b7 c\u00f3digo ' + codigo);
     }
 
     pina.gajo = gajo;
@@ -434,6 +654,46 @@ module.exports = function montarPinas(app, ctx) {
     });
   });
 
+  // ===== "GANE ALGO?" - lo consulta el celular del cliente =====
+  // Sin clave, porque lo abre el cliente, pero solo devuelve lo que le
+  // corresponde a ESE aparato y solo de la noche de hoy. El totem canta el
+  // nombre del rey; el codigo sale aca, en la mano del que gano.
+  /* El aparato es la llave, asi que hay que hacer que probar llaves no sirva.
+     Sin freno, alguien podria tirar millones de "disp" inventados hasta pegarle
+     al del ganador. Con 20 intentos por minuto por IP, pegarle de casualidad
+     lleva mas tiempo que la vida del bar. */
+  const consultasPremio = {};
+  setInterval(function () {
+    const viejo = Date.now() - 60000;
+    Object.keys(consultasPremio).forEach(function (k) {
+      if (consultasPremio[k].desde < viejo) delete consultasPremio[k];
+    });
+  }, 60000);
+
+  app.get('/api/mipremio', function (req, res) {
+    const quien = String(req.headers['x-forwarded-for'] || req.ip || '?').slice(0, 45);
+    const ahoraMs = Date.now();
+    const reg = consultasPremio[quien];
+    if (!reg || ahoraMs - reg.desde > 60000) consultasPremio[quien] = { desde: ahoraMs, n: 1 };
+    else if (++reg.n > 20) {
+      log('PREMIO', 'demasiadas consultas de premio desde ' + quien);
+      return res.status(429).json({ premios: [] });
+    }
+
+    const disp = limpiar(req.query.disp, 40);
+    if (!disp) return res.json({ premios: [] });
+    const hoy = nocheHoy();
+    const mios = premios.filter(function (p) {
+      return p.noche === hoy && p.disp && p.disp === disp;
+    });
+    res.json({
+      premios: mios.map(function (p) {
+        return { codigo: p.codigo, premio: p.premio, tipo: p.tipo || 'ruleta',
+                 apodo: p.apodo, score: p.score || 0, entregado: !!p.entregado, ts: p.ts };
+      })
+    });
+  });
+
   // Se busca por CODIGO, no por id: es lo que el cliente canta en la barra.
   app.post('/api/premios/entregar', function (req, res) {
     if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
@@ -457,6 +717,493 @@ module.exports = function montarPinas(app, ctx) {
     guardar();
     log('PREMIO ENTREGADO', p.premio + ' \u00b7 c\u00f3digo ' + p.codigo);
     res.json({ ok: true, premio: p, fichasOk: fichasOk });
+  });
+
+  // Coronar a mano: si una noche cierran antes, o para probarlo.
+  app.get('/api/rey/coronar', function (req, res) {
+    if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
+    const r = coronarRey();
+    if (!r) return res.json({ ok: false, motivo: reyDeLaNoche(nocheHoy())
+      ? 'ya hay rey esta noche'
+      : 'hacen falta al menos ' + REY.minPersonas + ' personas distintas en el ranking' });
+    res.json({ ok: true, rey: { apodo: r.apodo, score: r.score, premio: r.premio, codigo: r.codigo } });
+  });
+
+  // ===== "GANE?" - LA PAGINA QUE SE ESCANEA DESDE EL TOTEM =====
+  /* El codigo no puede salir en la pantalla del bar: lo lee cualquiera y lo va
+     a cantar a la caja. Pero tampoco sirve dejarlo escondido en el celular del
+     que cargo, porque a las 3 de la manana ese celular ya cerro la pagina.
+     Entonces el totem muestra un QR: "ganaste? escanea aca". Lo escanea todo
+     el mundo, y la pagina le contesta a cada uno segun el aparato con el que
+     cargo su pina. Al que gano le muestra el codigo; al resto le dice que no.
+     El que no gano no puede sacarle el codigo a nadie: el aparato no lo tiene. */
+  const HTML_PREMIO = [
+'<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">',
+'<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">',
+'<meta name="color-scheme" content="dark"><title>BeerPunch \u00b7 \u00bfGanaste?</title>',
+'<link rel="preconnect" href="https://fonts.googleapis.com">',
+'<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>',
+'<link href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">',
+'<style>',
+'*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}',
+'body{background:#04050a;color:#fff;font:600 16px/1.5 "Barlow Condensed",system-ui,sans-serif;',
+'  min-height:100vh;display:flex;align-items:center;justify-content:center;',
+'  padding:34px 22px calc(34px + env(safe-area-inset-bottom));text-align:center}',
+'.caja{width:100%;max-width:380px}',
+'.marca{font-family:Anton,Impact,sans-serif;font-size:22px;letter-spacing:.04em}',
+'.marca i{font-style:normal;color:#D7252A}',
+'.corona{font-size:52px;line-height:1;margin-top:18px}',
+'.tit{font-family:Anton,Impact,sans-serif;color:#FFD518;font-size:27px;margin-top:12px;line-height:1.15}',
+'.sub{color:#c7cdd6;font-size:15px;margin-top:10px;line-height:1.5}',
+'.ficha{margin-top:22px;padding:22px;border-radius:18px;border:1px solid rgba(255,213,24,.45);',
+'  background:rgba(255,213,24,.08)}',
+'.et{color:#8b93a1;letter-spacing:3px;font-size:10.5px}',
+'.cod{font-family:Anton,Impact,sans-serif;font-size:54px;letter-spacing:9px;line-height:1;margin-top:10px}',
+'.no{color:#8b93a1;font-size:15px;line-height:1.6;margin-top:14px}',
+'.b{display:block;margin-top:22px;padding:15px;border-radius:13px;background:#D7252A;color:#fff;',
+'  text-decoration:none;font-family:Anton,Impact,sans-serif;font-size:17px;letter-spacing:.04em}',
+'.gris{background:transparent;border:1px solid #2b303b;color:#8b93a1;font-size:14px}',
+'</style></head><body><div class="caja" id="c">',
+'<div class="marca">BEER<i>PUNCH</i></div>',
+'<div class="sub" id="estado">Fij\u00e1ndonos\u2026</div>',
+'</div>',
+'<script>',
+'var DISP="";try{DISP=localStorage.getItem("bp_disp")||"";}catch(e){}',
+'function esc(t){var d=document.createElement("div");d.textContent=t==null?"":t;return d.innerHTML;}',
+'function pintar(h){document.getElementById("c").innerHTML=',
+'  \'<div class="marca">BEER<i>PUNCH</i></div>\'+h;}',
+'function nada(msg){',
+'  pintar(\'<div class="tit" style="color:#fff;margin-top:26px">\'+msg+\'</div>\'+',
+'    \'<div class="no">El premio de la noche es para el que qued\u00f3 primero en el ranking.\'+',
+'    \'<br><br>Si cargaste tu pi\u00f1a desde OTRO celular, abr\u00ed esto desde ese.\'+',
+'    \'<br><br>Y si est\u00e1s seguro de que ganaste, and\u00e1 a la caja y dec\u00ed tu apodo: ah\u00ed te lo buscan igual.</div>\'+',
+'    \'<a class="b" href="/m">CARGAR UNA PI\u00d1A</a>\');',
+'}',
+'if(!DISP){ nada("NO CARGASTE NINGUNA PI\u00d1A DESDE ESTE CELULAR"); }',
+'else{',
+'  fetch("/api/mipremio?disp="+encodeURIComponent(DISP)).then(function(r){return r.json();})',
+'  .then(function(d){',
+'    var l=(d&&d.premios)||[];',
+'    var g=null;',
+'    for(var i=0;i<l.length;i++){ if(l[i].tipo==="rey"||l[i].tipo==="reina"){ g=l[i]; break; } }',
+'    if(!g){ nada("ESTA NOCHE NO GANASTE"); return; }',
+'    if(g.entregado){',
+'      pintar(\'<div class="corona">&#127894;</div><div class="tit">YA LO RETIRASTE</div>\'+',
+'        \'<div class="sub">\'+esc(g.premio)+\' &middot; c\u00f3digo \'+esc(g.codigo)+\'</div>\');',
+'      return;',
+'    }',
+'    pintar(\'<div class="corona">&#127894;</div>\'+',
+'      \'<div class="tit">SOS \'+(g.tipo==="reina"?"LA REINA":"EL REY")+\'<br>DE LA NOCHE</div>\'+',
+'      \'<div class="sub">Quedaste primero con <b>\'+(g.score||0)+\' puntos</b><br>Te ganaste \'+esc(g.premio)+\'</div>\'+',
+'      \'<div class="ficha"><div class="et">C\u00d3DIGO PARA LA CAJA</div>\'+',
+'      \'<div class="cod">\'+esc(g.codigo)+\'</div>\'+',
+'      \'<div class="et" style="margin-top:12px;letter-spacing:1px;line-height:1.5">And\u00e1 a la caja y mostr\u00e1 este c\u00f3digo<br>Si lo perd\u00e9s, lo buscan por tu apodo</div></div>\');',
+'    try{ if(navigator.vibrate) navigator.vibrate([90,70,90,70,220]); }catch(e){}',
+'  })',
+'  .catch(function(){ nada("NO SE PUDO CONSULTAR"); });',
+'}',
+'<\/script></body></html>'
+  ].join('\n');
+
+  app.get('/premio', function (req, res) { res.type('html').send(HTML_PREMIO); });
+
+  // ===== LA PANTALLA DE LA CAJA =====
+  /* Hasta ahora los premios se entregaban con un POST que habia que armar a
+     mano. En la practica eso significa que no se entregaban. Esta es la
+     pantalla que abre la caja: los que faltan retirar, con un boton cada uno,
+     y un casillero para tipear el codigo que canta el cliente. */
+  const HTML_CAJA = [
+'<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">',
+'<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">',
+'<meta name="color-scheme" content="dark"><title>BeerPunch \u00b7 Premios</title>',
+'<style>',
+'*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}',
+'body{background:#0a0b10;color:#fff;font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;',
+'  padding:0 14px calc(40px + env(safe-area-inset-bottom));max-width:620px;margin:0 auto}',
+'header{position:sticky;top:0;background:#0a0b10;padding:18px 0 12px;border-bottom:1px solid #23262f;z-index:5}',
+'h1{font-size:19px;letter-spacing:.5px}h1 span{color:#D7252A}',
+'.sub{color:#8b93a1;font-size:13px;margin-top:3px}',
+'.buscar{display:flex;gap:8px;margin:16px 0}',
+'.buscar input{flex:1;min-width:0;background:#161922;border:1px solid #2b303b;color:#fff;border-radius:11px;',
+'  padding:14px;font-size:26px;letter-spacing:6px;text-align:center;font-weight:700}',
+'.buscar button{flex:none;background:#FFD518;color:#000;border:0;border-radius:11px;padding:0 18px;',
+'  font-size:14px;font-weight:800;letter-spacing:.5px}',
+'.fila{display:flex;gap:12px;align-items:center;padding:13px 0;border-bottom:1px solid #191c23}',
+'.dat{flex:1;min-width:0}',
+'.nom{font-weight:700;letter-spacing:.5px;font-size:17px}',
+'.meta{color:#8b93a1;font-size:12.5px;margin-top:2px}',
+'.pr{color:#FFD518;font-weight:700;font-size:14px}',
+'.cod{font-family:ui-monospace,Menlo,monospace;font-size:21px;font-weight:700;letter-spacing:2px}',
+'.rey{display:inline-block;background:#FFD51822;color:#FFD518;border-radius:20px;padding:1px 8px;',
+'  font-size:11px;font-weight:700;margin-left:5px}',
+'.reina{background:#F1437B22;color:#F1437B}',
+'button.ac{flex:none;border:0;background:#1f7a3a;color:#fff;border-radius:10px;padding:12px 14px;',
+'  font-size:13px;font-weight:800;letter-spacing:.5px}',
+'button.ac:disabled{opacity:.5}',
+'.vacio{text-align:center;color:#5b6270;padding:44px 0}',
+'.msg{margin:14px 0;padding:14px;border-radius:11px;font-size:15px;line-height:1.45}',
+'.msg.ok{background:#12301c;border:1px solid #1f7a3a;color:#9be0b0}',
+'.msg.mal{background:#3a1212;border:1px solid #7a2323;color:#ff9a9c}',
+'h2{font-size:12px;letter-spacing:2px;color:#5b6270;margin:22px 0 4px;text-transform:uppercase}',
+'.ya{opacity:.45}',
+'</style></head><body>',
+'<header><h1>BEER<span>PUNCH</span> \u00b7 premios</h1>',
+'<div class="sub" id="sub">cargando\u2026</div></header>',
+'<div class="buscar"><input id="cod" inputmode="numeric" maxlength="4" placeholder="0000">',
+'<button onclick="entregar(document.getElementById(\'cod\').value)">ENTREGAR</button></div>',
+'<div id="msg"></div><div id="lista"></div>',
+'<script>',
+'var CLAVE=new URLSearchParams(location.search).get("clave")||"";',
+'var q=CLAVE?("?clave="+encodeURIComponent(CLAVE)):"";',
+'function hora(ts){return new Date(ts).toLocaleTimeString("es-AR",{timeZone:"America/Argentina/Buenos_Aires",hour:"2-digit",minute:"2-digit",hour12:false});}',
+'function aviso(t,ok){var m=document.getElementById("msg");',
+'  m.innerHTML="<div class=\'msg "+(ok?"ok":"mal")+"\'>"+t+"</div>";',
+'  setTimeout(function(){m.innerHTML="";},6000);}',
+'function tarjeta(p,entregado){',
+'  var d=document.createElement("div");d.className="fila"+(entregado?" ya":"");',
+'  var dat=document.createElement("div");dat.className="dat";',
+'  var n=document.createElement("div");n.className="nom";n.textContent=p.apodo;',
+'  if(p.tipo==="rey"||p.tipo==="reina"){var b=document.createElement("span");',
+'    b.className="rey"+(p.tipo==="reina"?" reina":"");',
+'    b.textContent=p.tipo==="reina"?"REINA DE LA NOCHE":"REY DE LA NOCHE";n.appendChild(b);}',
+'  dat.appendChild(n);',
+'  var pr=document.createElement("div");pr.className="pr";pr.textContent=p.premio;dat.appendChild(pr);',
+'  var m=document.createElement("div");m.className="meta";',
+'  m.textContent=hora(p.ts)+(p.score?" \u00b7 "+p.score+" puntos":"")+(entregado?" \u00b7 entregado":"");',
+'  dat.appendChild(m);',
+'  var c=document.createElement("div");c.className="cod";c.textContent=p.codigo;',
+'  d.appendChild(c);d.appendChild(dat);',
+'  if(!entregado){',
+'    var bt=document.createElement("button");bt.className="ac";bt.textContent="ENTREGAR";',
+'    bt.onclick=function(){bt.disabled=true;entregar(p.codigo);};',
+'    d.appendChild(bt);',
+'  }',
+'  return d;',
+'}',
+'function pintar(d){',
+'  var L=document.getElementById("lista");L.innerHTML="";',
+'  var pen=d.pendientes||[],ent=d.entregados||[];',
+'  document.getElementById("sub").textContent=',
+'    pen.length?(pen.length+(pen.length===1?" premio sin retirar":" premios sin retirar")):"no queda ninguno sin retirar";',
+'  if(!pen.length&&!ent.length){L.innerHTML="<div class=\'vacio\'>Todav\u00eda no sali\u00f3 ning\u00fan premio esta noche</div>";return;}',
+'  if(pen.length){var h=document.createElement("h2");h.textContent="Sin retirar";L.appendChild(h);',
+'    pen.forEach(function(p){L.appendChild(tarjeta(p,false));});}',
+'  if(ent.length){var h2=document.createElement("h2");h2.textContent="Ya entregados";L.appendChild(h2);',
+'    ent.forEach(function(p){L.appendChild(tarjeta(p,true));});}',
+'}',
+'function cargar(){',
+'  fetch("/api/premios"+q).then(function(r){if(r.status===401)throw new Error("clave");return r.json();})',
+'  .then(pintar).catch(function(e){',
+'    document.getElementById("lista").innerHTML="<div class=\'msg mal\'>"+',
+'      (e.message==="clave"?"Clave incorrecta. Abr\u00ed el link con ?clave=\u2026":"No se pudo cargar")+"</div>";});',
+'}',
+'function entregar(cod){',
+'  cod=String(cod||"").trim();',
+'  if(cod.length<4){aviso("Escrib\u00ed el c\u00f3digo de 4 n\u00fameros",false);cargar();return;}',
+'  fetch("/api/premios/entregar"+q,{method:"POST",headers:{"Content-Type":"application/json"},',
+'    body:JSON.stringify({codigo:cod})})',
+'  .then(function(r){return r.json().then(function(j){return{s:r.status,j:j};});})',
+'  .then(function(x){',
+'    if(x.s===200){',
+'      var f=x.j.fichasOk===null?"":(x.j.fichasOk?" \u00b7 los tiros ya cayeron en la m\u00e1quina":" \u00b7 OJO: los tiros no se pudieron cargar");',
+'      aviso("Entregado a <b>"+x.j.premio.apodo+"</b>: "+x.j.premio.premio+f,true);',
+'      document.getElementById("cod").value="";',
+'    } else { aviso(x.j.error||"no se pudo",false); }',
+'    cargar();',
+'  }).catch(function(){aviso("Sin conexi\u00f3n",false);cargar();});',
+'}',
+'cargar();setInterval(cargar,15000);',
+'<\/script></body></html>'
+  ].join('\n');
+
+  app.get('/premios', function (req, res) {
+    if (!claveOk(req)) return res.status(401).send('falta la clave');
+    res.type('html').send(HTML_CAJA);
+  });
+
+  // ===== EL TOTEM EN VIVO, PARA MIRARLO Y GRABARLO =====
+  /* Es la MISMA pagina del totem metida adentro, en modo espejo: misma
+     conexion en vivo, mismos datos, mismos carteles, al mismo tiempo que la
+     tele. No es una copia ni una simulacion.
+     Sirve para dos cosas: mirar desde la barra como esta quedando sin darse
+     vuelta, y grabar la pantalla del celular para Instagram. Por eso entra
+     derecha y en 9:16, que es la medida de una historia o un reel: lo que
+     grabes ya sale con la proporcion justa, sin bordes negros ni recortes.
+     El boton de pantalla completa saca la barra del navegador, que es lo
+     unico que ensucia una captura. */
+  const HTML_VIVO = [
+'<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">',
+'<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">',
+'<meta name="color-scheme" content="dark"><title>BeerPunch &middot; En vivo</title>',
+'<style>',
+'*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}',
+'html,body{height:100%;background:#000;overflow:hidden;',
+'  font:600 15px/1.4 system-ui,-apple-system,Segoe UI,sans-serif;color:#fff}',
+'#caja{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}',
+'#tv{flex:none;border:0;display:block;transform-origin:center center;background:#04050a;',
+'  border-radius:10px;box-shadow:0 18px 50px -18px rgba(0,0,0,.9)}',
+'body.limpio #barra{opacity:0;pointer-events:none}',
+'body.limpio #tv{border-radius:0;box-shadow:none}',
+'#barra{position:fixed;left:0;right:0;bottom:0;z-index:5;display:flex;gap:8px;',
+'  padding:12px 14px calc(12px + env(safe-area-inset-bottom));',
+'  background:linear-gradient(180deg,transparent,rgba(0,0,0,.85) 45%);transition:opacity .25s}',
+'.b{flex:1;text-align:center;border:1px solid #2b303b;background:rgba(20,22,29,.92);color:#fff;',
+'  border-radius:11px;padding:13px 8px;font-size:13.5px;font-weight:700;letter-spacing:.4px;',
+'  text-decoration:none}',
+'.b.on{background:#FFD518;border-color:#FFD518;color:#000}',
+'#ayuda{position:fixed;left:0;right:0;top:0;z-index:5;padding:12px 16px;font-size:12.5px;',
+'  color:#98A1B0;display:flex;justify-content:space-between;align-items:center;gap:12px;',
+'  background:linear-gradient(180deg,rgba(0,0,0,.85),transparent);transition:opacity .25s}',
+'#ayuda a{color:#FFD518;text-decoration:none;font-weight:700}',
+'#caja{overflow:hidden}',
+'body.limpio #ayuda{opacity:0}',
+'</style></head><body>',
+'<div id="ayuda"><a id="bVolver" href="#">&larr; volver</a>',
+'<span>en vivo, lo mismo que la tele</span></div>',
+'<div id="caja"><iframe id="tv" src="/totem?espejo=1" title="T&oacute;tem"></iframe></div>',
+'<div id="barra">',
+'<button class="b" id="bLimpio">OCULTAR</button>',
+'<button class="b" id="bLlenar">LLENAR</button>',
+'<button class="b" id="bFull">PANTALLA COMPLETA</button>',
+'</div>',
+'<script>',
+'var CLAVE=new URLSearchParams(location.search).get("clave")||"";',
+'document.getElementById("bVolver").href="/metricas"+(CLAVE?"?clave="+encodeURIComponent(CLAVE):"");',
+/* El totem es 9:16. En vez de deformarlo, se lo dibuja SIEMPRE a 1080x1920
+   -que es la medida nativa de una historia- y se lo achica entero con una
+   escala. Asi la maqueta de adentro es identica a la de la tele: si se le
+   diera un tamano raro, las medidas internas cambiarian y no estarias
+   mirando lo mismo que se ve afuera. */
+'var ANCHO=1080, ALTO=1920;',
+'var llenar=false;',
+'function acomodar(){',
+'  var tv=document.getElementById("tv");',
+'  var w=window.innerWidth, h=window.innerHeight;',
+/* "Entrar" muestra el totem completo y deja bandas negras si el celular es
+   mas largo que 9:16 (casi todos lo son). "Llenar" no deja bandas, al precio
+   de recortar un poco arriba y abajo. Para una historia conviene llenar; para
+   mirar como quedo, entrar. */
+'  var k=llenar?Math.max(w/ANCHO,h/ALTO):Math.min(w/ANCHO,h/ALTO);',
+'  tv.style.width=ANCHO+"px"; tv.style.height=ALTO+"px";',
+'  tv.style.transform="scale("+k+")";',
+'}',
+'window.addEventListener("resize",acomodar);',
+'window.addEventListener("orientationchange",function(){setTimeout(acomodar,300);});',
+'acomodar();',
+'var limpio=false;',
+'document.getElementById("bLimpio").onclick=function(){',
+'  limpio=!limpio; document.body.classList.toggle("limpio",limpio);',
+'  this.classList.toggle("on",limpio);',
+'  this.textContent=limpio?"MOSTRAR":"OCULTAR";',
+'};',
+/* Al tocar la pantalla con los botones ocultos vuelven a aparecer: si no,
+   quedarias encerrado sin forma de salir. */
+'document.getElementById("caja").onclick=function(){',
+'  if(!limpio)return;',
+'  limpio=false; document.body.classList.remove("limpio");',
+'  var b=document.getElementById("bLimpio");',
+'  b.classList.remove("on"); b.textContent="OCULTAR";',
+'};',
+'document.getElementById("bLlenar").onclick=function(){',
+'  llenar=!llenar; this.classList.toggle("on",llenar);',
+'  this.textContent=llenar?"9:16":"LLENAR"; acomodar();',
+'};',
+'document.getElementById("bFull").onclick=function(){',
+'  var d=document.documentElement;',
+'  try{',
+'    if(document.fullscreenElement||document.webkitFullscreenElement){',
+'      (document.exitFullscreen||document.webkitExitFullscreen).call(document);',
+'    }else{',
+'      (d.requestFullscreen||d.webkitRequestFullscreen).call(d);',
+'    }',
+'  }catch(e){}',
+'  setTimeout(acomodar,400);',
+'};',
+'<\/script></body></html>'
+  ].join('\n');
+
+  app.get('/vivo', function (req, res) {
+    if (!claveOk(req)) return res.status(401).send('falta la clave');
+    res.type('html').send(HTML_VIVO);
+  });
+
+  // ===== MODO PRUEBA =====
+  /* Todo esto vive detras de la clave y no lo puede tocar un cliente. Es para
+     poder ver funcionar el sistema un martes a las 4 de la tarde en vez de
+     tener que esperar a que sea sabado a las 3 de la manana con el bar lleno.
+     Las pinas que se cargan desde aca quedan marcadas y se borran todas
+     juntas con un boton, asi no ensucian las metricas de verdad. */
+  function limpiarPruebas() {
+    const antesP = pinas.length, antesX = premios.length;
+    const ids = {};
+    pinas.forEach(function (p) { if (p.prueba) ids[p.id] = 1; });
+    pinas = pinas.filter(function (p) { return !p.prueba; });
+    premios = premios.filter(function (x) { return !(x.pina && ids[x.pina]) && !x.prueba; });
+    guardar();
+    return { pinas: antesP - pinas.length, premios: antesX - premios.length };
+  }
+
+  app.post('/api/probar/pina', function (req, res) {
+    if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
+    const b = req.body || {};
+    const apodo = (limpiar(b.apodo, 14) || 'PRUEBA').toUpperCase();
+    const score = Math.max(1, Math.min(999, Math.floor(Number(b.score) || (100 + crypto.randomInt(0, 850)))));
+    const ahora = Date.now();
+    const previo = estado().record.score;
+    const pina = {
+      id: 'p' + ahora.toString(36) + crypto.randomBytes(2).toString('hex'),
+      ts: ahora, noche: nocheHoy(), apodo: apodo, ig: '',
+      sexo: (b.sexo === 'F') ? 'F' : 'M', score: score, foto: null,
+      envio: null, disp: null, huella: null, giro: false, gajo: null,
+      aprobada: true, oculta: false, ip: 'prueba', prueba: true
+    };
+    pinas.push(pina);
+    guardar();
+    const esRecord = score > previo;
+    emitir(esRecord ? 'record' : 'golpe',
+      { nombre: apodo, ig: '', score: score, esRecord: esRecord, sexo: pina.sexo });
+    emitir('estado', estado());
+    log('PRUEBA', 'pi\u00f1a de prueba: ' + apodo + ' ' + score);
+    res.json({ ok: true, apodo: apodo, score: score, esRecord: esRecord });
+  });
+
+  // Volver a habilitar el giro: es lo que Fausto necesita para probar la
+  // ruleta mas de una vez con el mismo celular.
+  app.post('/api/probar/desbloquear', function (req, res) {
+    if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
+    const b = req.body || {};
+    const disp = limpiar(b.disp, 40);
+    const apodo = limpiar(b.apodo, 14).toUpperCase();
+    const hoy = nocheHoy();
+    let n = 0;
+    pinas.forEach(function (p) {
+      if (p.noche !== hoy) return;
+      const mismo = (disp && p.disp === disp) ||
+                    (apodo && clavePersona(p.apodo) === clavePersona(apodo));
+      if (mismo && p.giro) { p.giro = false; n++; }
+    });
+    // La huella de la foto tambien frena el reintento: si va a volver a
+    // cargar la misma foto para probar, hay que soltarla.
+    if (disp) pinas.forEach(function (p) { if (p.noche === hoy && p.disp === disp) p.huella = null; });
+    guardar();
+    log('PRUEBA', 'giro desbloqueado (' + n + ' pi\u00f1as) para ' + (apodo || disp));
+    res.json({ ok: true, liberadas: n });
+  });
+
+  app.post('/api/probar/limpiar', function (req, res) {
+    if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
+    const r = limpiarPruebas();
+    emitir('estado', estado());
+    log('PRUEBA', 'borradas ' + r.pinas + ' pi\u00f1as de prueba y ' + r.premios + ' premios');
+    res.json({ ok: true, borradas: r });
+  });
+
+  // Descoronar, para poder volver a probar el premio de la noche.
+  app.post('/api/probar/descoronar', function (req, res) {
+    if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
+    const hoy = nocheHoy();
+    const antes = premios.length;
+    premios = premios.filter(function (p) {
+      return !((p.tipo === 'rey' || p.tipo === 'reina') && p.noche === hoy);
+    });
+    guardar();
+    emitir('estado', estado());
+    res.json({ ok: true, borrados: antes - premios.length });
+  });
+
+  const HTML_PROBAR = [
+'<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">',
+'<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">',
+'<meta name="color-scheme" content="dark"><title>BeerPunch \u00b7 Probar</title>',
+'<style>',
+'*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}',
+'body{background:#0a0b10;color:#fff;font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;',
+'  padding:0 14px calc(40px + env(safe-area-inset-bottom));max-width:560px;margin:0 auto}',
+'header{padding:20px 0 12px;border-bottom:1px solid #23262f}',
+'h1{font-size:19px;letter-spacing:.5px}h1 span{color:#D7252A}',
+'.sub{color:#8b93a1;font-size:13px;margin-top:4px;line-height:1.45}',
+'h2{font-size:11px;letter-spacing:2.4px;color:#5b6270;margin:24px 0 8px;text-transform:uppercase}',
+'.b{display:block;width:100%;text-align:center;border:1px solid #2b303b;background:#161922;color:#fff;',
+'  border-radius:12px;padding:15px;font-size:15px;font-weight:700;margin-bottom:9px;text-decoration:none}',
+'.b.oro{background:#FFD518;color:#000;border-color:#FFD518}',
+'.b.rojo{background:#2a1414;border-color:#7a2323;color:#ff9a9c}',
+'.b:disabled{opacity:.5}',
+'.fila{display:flex;gap:8px;margin-bottom:9px}',
+'.fila input{flex:1;min-width:0;background:#161922;border:1px solid #2b303b;color:#fff;',
+'  border-radius:12px;padding:15px;font-size:15px}',
+'.msg{margin:12px 0;padding:13px;border-radius:11px;font-size:14.5px;line-height:1.45}',
+'.msg.ok{background:#12301c;border:1px solid #1f7a3a;color:#9be0b0}',
+'.msg.mal{background:#3a1212;border:1px solid #7a2323;color:#ff9a9c}',
+'.nota{color:#5b6270;font-size:12.5px;line-height:1.5;margin:6px 0 0}',
+'</style></head><body>',
+'<header><h1>BEER<span>PUNCH</span> \u00b7 probar</h1>',
+'<div class="sub">Todo lo de ac\u00e1 es de mentira y se borra con un bot\u00f3n. ',
+'Ten\u00e9 el t\u00f3tem a la vista mientras toc\u00e1s: la idea es que veas pasar las cosas en la pantalla.</div></header>',
+'<div id="msg"></div>',
+
+'<h2>1 \u00b7 el t\u00f3tem</h2>',
+'<button class="b" onclick="pina()">Cargar una pi\u00f1a de prueba</button>',
+'<div class="fila"><input id="ap" placeholder="apodo" maxlength="14">',
+'<input id="sc" placeholder="puntos" inputmode="numeric" maxlength="3"></div>',
+'<p class="nota">Si dej\u00e1s los casilleros vac\u00edos inventa un nombre y un puntaje. ',
+'Si el puntaje supera al r\u00e9cord, en el t\u00f3tem salta el cartel\u00f3n de r\u00e9cord.</p>',
+
+'<h2>2 \u00b7 el premio de la noche</h2>',
+'<button class="b oro" onclick="pedir("/api/rey/coronar","GET")">Coronar al rey AHORA</button>',
+'<p class="nota">Hace de cuenta que son las 3. Necesita al menos 5 pi\u00f1as cargadas esta noche ',
+'(carg\u00e1 5 de prueba con el bot\u00f3n de arriba). En el t\u00f3tem sale el anuncio con el QR.</p>',
+'<a class="b" href="/premio">Abrir la p\u00e1gina del QR (\u00bfgan\u00e9?)</a>',
+'<a class="b" id="lPremios" href="#">Abrir la pantalla de la caja</a>',
+'<button class="b rojo" onclick="pedir("/api/probar/descoronar")">Descoronar (para volver a probar)</button>',
+
+'<h2>3 \u00b7 la ruleta</h2>',
+'<button class="b" onclick="desbloquear()">Dejarme girar de nuevo</button>',
+'<p class="nota">La ruleta se gira una vez por noche por persona y por celular. ',
+'Esto suelta el candado de ESTE celular para que puedas volver a cargar y girar.</p>',
+'<a class="b" href="/m">Ir a cargar una pi\u00f1a de verdad</a>',
+
+'<h2>4 \u00b7 limpiar</h2>',
+'<button class="b rojo" onclick="pedir("/api/probar/limpiar")">Borrar todas las pi\u00f1as de prueba</button>',
+'<p class="nota">Borra s\u00f3lo las que cargaste desde ac\u00e1. Las de verdad no se tocan.</p>',
+
+'<script>',
+'var CLAVE=new URLSearchParams(location.search).get("clave")||"";',
+'var q=CLAVE?("?clave="+encodeURIComponent(CLAVE)):"";',
+'document.getElementById("lPremios").href="/premios"+q;',
+'document.getElementById("lVivo").href="/vivo"+q;',
+'function aviso(t,ok){var m=document.getElementById("msg");',
+'  m.innerHTML="<div class=\'msg "+(ok?"ok":"mal")+"\'>"+t+"</div>";',
+'  window.scrollTo(0,0);setTimeout(function(){m.innerHTML="";},7000);}',
+'function pedir(ruta,metodo,datos){',
+'  return fetch(ruta+q,{method:metodo||"POST",headers:{"Content-Type":"application/json"},',
+'    body:(metodo==="GET")?undefined:JSON.stringify(datos||{})})',
+'  .then(function(r){return r.json();})',
+'  .then(function(d){',
+'    if(d.error){aviso(d.error,false);return d;}',
+'    if(d.ok===false){aviso(d.motivo||"no se pudo",false);return d;}',
+'    if(d.rey){aviso("Coronado <b>"+d.rey.apodo+"</b> con "+d.rey.score+" \u00b7 "+d.rey.premio+" \u00b7 c\u00f3digo <b>"+d.rey.codigo+"</b>. Mir\u00e1 el t\u00f3tem.",true);return d;}',
+'    if(d.borradas){aviso("Borradas "+d.borradas.pinas+" pi\u00f1as de prueba",true);return d;}',
+'    if(typeof d.borrados==="number"){aviso("Listo, ya se puede volver a coronar",true);return d;}',
+'    if(typeof d.liberadas==="number"){aviso("Listo: pod\u00e9s volver a cargar y girar desde este celular",true);return d;}',
+'    aviso("Listo",true);return d;',
+'  }).catch(function(){aviso("Sin conexi\u00f3n",false);});',
+'}',
+'function pina(){',
+'  var a=document.getElementById("ap").value,s=document.getElementById("sc").value;',
+'  pedir("/api/probar/pina","POST",{apodo:a,score:s}).then(function(d){',
+'    if(d&&d.ok)aviso("Cargada: <b>"+d.apodo+"</b> con "+d.score+(d.esRecord?" \u00b7 \u00a1R\u00c9CORD!":"")+". Mir\u00e1 el t\u00f3tem.",true);',
+'  });',
+'}',
+'function desbloquear(){',
+'  var disp="";try{disp=localStorage.getItem("bp_disp")||"";}catch(e){}',
+'  pedir("/api/probar/desbloquear","POST",{disp:disp,apodo:document.getElementById("ap").value});',
+'}',
+'<\/script></body></html>'
+  ].join('\n');
+
+  app.get('/probar', function (req, res) {
+    if (!claveOk(req)) return res.status(401).send('falta la clave');
+    res.type('html').send(HTML_PROBAR);
   });
 
   // ===== MODERACION =====
