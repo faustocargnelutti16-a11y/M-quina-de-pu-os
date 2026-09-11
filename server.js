@@ -102,22 +102,6 @@ try {
   motivoSinPersistencia = e.message;
 }
 
-// Escritura atomica. writeFileSync pelado deja el JSON partido a la mitad si
-// se corta la luz justo en el medio, y en el arranque siguiente el server no
-// levanta. Escribimos a un temporal, lo bajamos a disco de verdad con fsync y
-// recien ahi renombramos: el rename es todo o nada.
-function escribirAtomico(archivo, texto) {
-  const tmp = archivo + '.tmp';
-  const fd = fs.openSync(tmp, 'w');
-  try {
-    fs.writeSync(fd, texto);
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
-  }
-  fs.renameSync(tmp, archivo);
-}
-
 function leerJSON(archivo, porDefecto) {
   if (!persistenciaOk) return porDefecto;
   try {
@@ -135,7 +119,7 @@ let caidas = [];
 
 function guardarCaidas() {
   if (!persistenciaOk) return;
-  try { escribirAtomico(F_ENCENDIDOS, JSON.stringify(caidas)); } catch (e) {}
+  try { fs.writeFileSync(F_ENCENDIDOS, JSON.stringify(caidas)); } catch (e) {}
 }
 
 function abrirCaida(desde) {
@@ -148,15 +132,47 @@ function abrirCaida(desde) {
 function cerrarCaida() {
   for (let i = caidas.length - 1; i >= 0; i--) {
     if (caidas[i].fin === null) {
-      caidas[i].fin = Date.now();
-      // Si hubo un aviso de arranque despues de que empezo la caida,
-      // la maquina se apago de verdad. Si no, fue la conexion.
-      caidas[i].motivo = (ultimoArranqueShelly > caidas[i].inicio) ? 'apagada' : 'wifi';
+      const c = caidas[i];
+      c.fin = Date.now();
+
+      /* Apagada o wifi. Antes esto dependia de que el Shelly alcanzara a
+         avisar su arranque (/shelly-hello). Si ese aviso se perdia -y se
+         pierde, porque sale justo cuando la red todavia se esta acomodando-
+         un apagado quedaba anotado como corte de wifi.
+         Ahora el Shelly manda en cada consulta cuanto hace que esta
+         prendido. Con eso no hace falta que avise nada: si volvio diciendo
+         que hace 2 minutos que arranco y estuvo 40 minutos afuera, es
+         porque estuvo apagado. Si volvio diciendo que hace 6 horas que esta
+         prendido, nunca se apago: fue la conexion. */
+      if (uptimeShelly > 0) {
+        const afueraMs = c.fin - c.inicio;
+        // Un poco de margen: el reloj del Shelly y el nuestro no son el mismo.
+        c.motivo = (uptimeShelly * 1000 < afueraMs - 60000) ? 'apagada' : 'wifi';
+        c.seguro = true;                       // deducido del uptime, no adivinado
+        if (c.motivo === 'apagada') {
+          // La prendieron hace uptime segundos; la apagaron, como muy tarde,
+          // cuando dejo de contestar.
+          c.prendida = c.fin - uptimeShelly * 1000;
+          c.apagada = c.inicio;
+        }
+      } else {
+        c.motivo = (ultimoArranqueShelly > c.inicio) ? 'apagada' : 'wifi';
+        c.seguro = false;
+        if (c.motivo === 'apagada') { c.apagada = c.inicio; c.prendida = ultimoArranqueShelly; }
+      }
       guardarCaidas();
-      return caidas[i];
+      return c;
     }
   }
   return null;
+}
+
+// "03:42" en hora de Mendoza. Para los avisos, que se leen en el celular.
+function horaCorta(ts) {
+  if (!ts) return '?';
+  return new Date(ts).toLocaleString('es-AR', {
+    timeZone: 'America/Argentina/Buenos_Aires', hour12: false,
+    hour: '2-digit', minute: '2-digit' });
 }
 
 function minutosDe(c) {
@@ -194,9 +210,9 @@ function guardarTodo() {
   setTimeout(function () {
     guardadoPendiente = false;
     try {
-      escribirAtomico(F_PAGOS, JSON.stringify(pagosProcesados));
-      escribirAtomico(F_LOG, JSON.stringify(eventos));
-      escribirAtomico(F_VENTAS, JSON.stringify(ventas));
+      fs.writeFileSync(F_PAGOS, JSON.stringify(pagosProcesados));
+      fs.writeFileSync(F_LOG, JSON.stringify(eventos));
+      fs.writeFileSync(F_VENTAS, JSON.stringify(ventas));
     } catch (e) {
       console.log('error guardando en /data: ' + e.message);
     }
@@ -204,7 +220,22 @@ function guardarTodo() {
 }
 
 // ===== ESTADO =====
+/* La cola de fichas vivia SOLO en memoria: si el server se reiniciaba (un
+   deploy, un reinicio de Railway, un cierre inesperado), las fichas que
+   alguien ya habia PAGADO y que estaban esperando a que la maquina volviera
+   se perdian sin dejar rastro. Cobrado y no entregado. Ahora se guarda en
+   disco y se recupera al arrancar. */
+const F_COLA = path.join(DATA_DIR, 'cola.json');
 let pendingActivation = 0;
+function guardarCola() {
+  if (!persistenciaOk) return;
+  try { escribirAtomico(F_COLA, JSON.stringify({ n: pendingActivation, ts: Date.now() })); } catch (e) {}
+}
+function setCola(n) {
+  const antes = pendingActivation;
+  pendingActivation = Math.max(0, n);
+  if (pendingActivation !== antes) guardarCola();
+}
 let entregaEnVuelo = null;
 let cajas = [];
 let bloqueado = false;
@@ -217,29 +248,60 @@ let ultimoGratis = 0;
 let ultimoPoll = 0;
 let pagosProcesados = leerJSON(F_PAGOS, {});
 caidas = leerJSON(F_ENCENDIDOS, []);
+(function () {
+  // Se recupera la cola, pero solo si es de las ultimas 24 h: una ficha
+  // paga hace tres dias ya no le sirve a nadie y caeria sobre un
+  // desconocido.
+  const c = leerJSON(F_COLA, null);
+  if (c && c.n > 0 && (Date.now() - (c.ts || 0)) < 24 * 3600e3) {
+    pendingActivation = Math.min(c.n, MAX_PENDING);
+    log('COLA', 'recuperadas ' + pendingActivation + ' fichas que quedaron sin entregar');
+  }
+})();
 let cantidadProcesados = Object.keys(pagosProcesados).length;
 let ultimoArranqueShelly = 0;
-
-// El modulo de metricas. Se llena mas abajo, cuando se monta. Queda declarado
-// aca arriba porque varias funciones de este archivo le avisan cosas, y como
-// esas funciones corren despues, para entonces ya esta cargado.
-let MET = null;
 // Que red wifi esta usando el Shelly y con cuanta senal. El script se lo
 // manda en cada consulta; solo lo anotamos en el log cuando CAMBIA, para
 // no ensuciar. Sirve para saber si se paso a la red de respaldo y si la
 // senal se cae antes de que se corte.
 let redShelly = '';
-let se\u00f1alShelly = '';
+let senalShelly = '';
 let redDesde = 0;
+// El modulo de metricas. Se monta al final del archivo; hasta entonces vale
+// null y todo lo que lo use tiene que preguntar antes. Si el modulo no carga,
+// el server sigue cobrando igual, solo que sin panel.
+let MET = null;
+
+/* Cuanto hace que el Shelly esta prendido, en segundos, tal como el nos lo
+   dice en cada consulta. Es el dato que separa "se apago la maquina" de "se
+   cayo el wifi" sin tener que adivinar, y ademas nos dice a que hora la
+   apagaron: la maquina dejo de contestar y volvio con el contador en cero. */
+let uptimeShelly = 0;
+let ultimoUptimeTs = 0;
 
 function anotarRed(req) {
   const ssid = String(req.query.ssid || '').slice(0, 32);
   const rssi = String(req.query.rssi || '').slice(0, 6);
+
+  // El uptime viaja aparte del ssid: si el script viejo todavia no lo manda,
+  // llega vacio y seguimos como antes, sin romper nada.
+  const up = Math.max(0, Math.floor(Number(req.query.up) || 0));
+  if (up > 0) {
+    // Si el contador BAJO, la maquina se apago y se volvio a prender, aunque
+    // nunca haya dejado de contestar el tiempo suficiente como para que lo
+    // llamaramos caida (un corte de luz corto, por ejemplo).
+    if (uptimeShelly > 0 && up < uptimeShelly - 60) {
+      log('MAQUINA REINICIADA', 'el Shelly volvio a arrancar (venia prendido hace ' +
+          Math.round(uptimeShelly / 60) + ' min)');
+      ultimoArranqueShelly = Date.now() - up * 1000;
+      if (MET) { try { MET.anotarArranque(); } catch (e) {} }
+    }
+    uptimeShelly = up;
+    ultimoUptimeTs = Date.now();
+  }
+
   if (!ssid) return;
-  if (rssi) se\u00f1alShelly = rssi;
-  // Metricas guarda el historial de redes en disco: solo cuando cambia, para
-  // no escribir un archivo entero cada 4,6 segundos.
-  if (MET) { try { MET.anotarRed(ssid, rssi); } catch (e) {} }
+  if (rssi) senalShelly = rssi;
   if (ssid !== redShelly) {
     log('RED WIFI', 'el Shelly esta en "' + ssid + '"' +
         (rssi ? ' (se\u00f1al ' + rssi + ' dBm)' : '') +
@@ -247,6 +309,7 @@ function anotarRed(req) {
     redShelly = ssid;
     redDesde = Date.now();
   }
+  if (MET) { try { MET.anotarRed(ssid, rssi); } catch (e) {} }
 }
 let desconexionesHoy = 0;
 const arranque = Date.now();
@@ -418,7 +481,7 @@ function agregarFichas(n, origen) {
   if (historialFichas.length + nSeguro > MAX_FICHAS_VENTANA) {
     bloqueado = true;
     motivoBloqueo = 'Mas de ' + MAX_FICHAS_VENTANA + ' fichas en ' + VENTANA_MIN + ' minutos';
-    pendingActivation = 0;
+    setCola(0);
     entregaEnVuelo = null;
     log('CORTE', motivoBloqueo + '. Entrega detenida. Reactivar con /reanudar');
     avisar('BPK - Corte automatico', 'El sistema se freno solo: ' + motivoBloqueo + '. Revisa el log.', true);
@@ -426,7 +489,7 @@ function agregarFichas(n, origen) {
   }
 
   for (let i = 0; i < nSeguro; i++) historialFichas.push(ahora);
-  pendingActivation = Math.min(pendingActivation + nSeguro, MAX_PENDING);
+  setCola(Math.min(pendingActivation + nSeguro, MAX_PENDING));
   log('FICHAS', '+' + nSeguro + ' (' + origen + ') -> cola=' + pendingActivation);
   return true;
 }
@@ -644,7 +707,8 @@ async function vigilarShelly() {
         'BPK - QR caido',
         'El Shelly no responde hace ' + silencioMin + ' min.\n' +
         'Ya corte el QR para que nadie pague algo que no podemos entregar.\n' +
-        'Fichas en cola esperando: ' + pendingActivation + '\n\n' +
+        'Fichas en cola esperando: ' + pendingActivation + '\n' +
+        (senalShelly ? 'Ultima senal wifi: ' + senalShelly + '\n' : '') + '\n' +
         'EL BILLETERO SIGUE ANDANDO: que cobren ahi mientras tanto.\n\n' +
         'Para arreglarlo: mira la app de Shelly.\n' +
         '- Si dice sin conexion -> cortar la luz de la maquina 10 seg\n' +
@@ -660,7 +724,21 @@ async function vigilarShelly() {
     avisoOlvidoEnviado = false;
     const cerrada = cerrarCaida();
     if (enHorarioDeBar()) {
-      avisar('BPK - Maquina OK', 'El Shelly volvio y el QR esta activo de nuevo.', false);
+      // En el momento del corte es imposible saber si fue el wifi o si la
+      // apagaron: se sabe recien cuando vuelve (si aviso arranque, la
+      // apagaron; si volvio a responder sin avisar, fue la conexion).
+      let porque = '';
+      if (cerrada) {
+        const min = minutosDe(cerrada);
+        porque = '\nEstuvo ' + min + ' min afuera. ' +
+          (cerrada.motivo === 'apagada'
+            ? 'Fue APAGADO: la apagaron ' + horaCorta(cerrada.apagada) +
+              ' y la prendieron ' + horaCorta(cerrada.prendida) + '.'
+            : 'Fue el WIFI: la maquina nunca se apago, se quedo sin conexion' +
+              (redShelly ? ' (estaba en "' + redShelly + '")' : '') + '.') +
+          (cerrada.seguro ? '' : ' (deducido, sin dato de encendido)');
+      }
+      avisar('BPK - Maquina OK', 'El Shelly volvio y el QR esta activo de nuevo.' + porque, false);
     } else {
       log('SHELLY OK', 'volvio, pero el bar esta cerrado: no se avisa');
     }
@@ -847,7 +925,7 @@ app.get('/estado', function (req, res) {
     'fichas ultimos ' + VENTANA_MIN + ' min = ' + ultimas + ' (tope ' + MAX_FICHAS_VENTANA + ')\n' +
     'ultimo poll del Shelly = ' + (segDesdePoll < 0 ? 'nunca' : 'hace ' + segDesdePoll + ' s') + '\n' +
     'red wifi del Shelly = ' + (redShelly
-        ? (redShelly + (se\u00f1alShelly ? ' (se\u00f1al ' + se\u00f1alShelly + ' dBm)' : '') +
+        ? (redShelly + (senalShelly ? ' (se\u00f1al ' + senalShelly + ' dBm)' : '') +
            (redDesde ? ' desde hace ' + Math.round((Date.now() - redDesde) / 60000) + ' min' : ''))
         : 'no informada (script viejo)') + '\n' +
     'ultimo arranque del Shelly = ' + (ultimoArranqueShelly ? new Date(ultimoArranqueShelly).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) : 'sin avisos desde que arranco el server') + '\n' +
@@ -1466,7 +1544,7 @@ app.get('/shelly-poll', function (req, res) {
 
   if (pendingActivation > 0) {
     const n = Math.min(pendingActivation, MAX_PENDING);
-    pendingActivation = 0;
+    setCola(0);
     entregaEnVuelo = { n: n, ts: Date.now(), intentos: 1 };
     log('ENVIO', n + ' fichas mandadas al Shelly, esperando confirmacion');
     res.type('text/plain').send(String(n));
@@ -1488,53 +1566,129 @@ app.get('/shelly-ack', function (req, res) {
 // "apagaron la maquina y la prendieron" de "se colgo el wifi y volvio solo".
 app.get('/shelly-hello', function (req, res) {
   ultimoArranqueShelly = Date.now();
-  // Guardado en disco: sin esto se perdia en cada deploy, y como cerrarCaida()
-  // compara contra este valor, TODOS los cortes quedaban marcados como wifi.
-  if (MET) { try { MET.anotarArranque(); } catch (e) {} }
   ultimoPoll = Date.now();
   anotarRed(req);
   log('SHELLY ARRANCO', 'el Shelly acaba de encenderse (corte de luz o reinicio)');
+  if (MET) { try { MET.anotarArranque(); } catch (e) {} }
   res.type('text/plain').send('ok');
 });
 
-app.get('/gratis', function (req, res) {
-  if (!claveOk(req)) { log('RECHAZO', '/gratis sin clave valida'); return res.status(403).send('clave invalida'); }
-  const ahora = Date.now();
-  if (ahora - ultimoGratis < COOLDOWN_GRATIS_MS) {
-    return res.send('Espera unos segundos antes de otra activacion');
+/* ===== ACCIONES QUE CUESTAN PLATA: NUNCA POR ABRIR UN LINK =====
+   La noche del 8 al 9 se encolaron 12 fichas gratis de madrugada, con la
+   maquina muerta, sin que nadie quisiera darlas. En los logs HTTP se ve el
+   patron: cada una entra DOS VECES separadas por menos de un segundo, desde
+   un navegador dentro de otra app (no Safari). O sea: no fue alguien
+   apretando un boton doce veces, fue un link que se abrio solo.
+   Y tiene que poder pasar, porque "dar un tiro gratis" era un <a href>: un
+   GET. Cualquier cosa que ABRA esa direccion -una vista previa, una pestana
+   que el telefono restaura, un acceso directo, alguien a quien le pasaste el
+   link una vez- gasta una ficha. Los buscadores y los previsualizadores
+   abren links; es lo que hacen.
+   Ahora abrir el link solo muestra un cartel con un boton. La ficha sale
+   con el POST, que ninguna vista previa hace nunca. */
+function accionProtegida(ruta, op) {
+  // GET: no hace nada, solo pregunta.
+  app.get(ruta, function (req, res) {
+    if (!claveOk(req)) { log('RECHAZO', ruta + ' sin clave valida'); return res.status(403).send('clave invalida'); }
+    const aviso = op.aviso ? op.aviso() : null;
+    const c = CLAVE ? '?clave=' + encodeURIComponent(CLAVE) : '';
+    res.type('text/html').send(paginaCupon({
+      titulo: op.titulo,
+      bloque: op.bloque,
+      cuerpo: '<p>' + (aviso || op.texto) + '</p>',
+      acento: op.acento || '#F5B301',
+      boton: (aviso && op.frenaSiAviso)
+        ? '<p class="chico"><a style="color:#F5B301" href="/panel' + c + '">Volver al panel</a></p>'
+        : '<button id="b" onclick="hacer()"><span>' + op.boton + '</span></button>' +
+          '<p class="chico">' + (op.pie || '') + '</p>' +
+          '<script>' +
+          'function hacer(){' +
+          'var b=document.getElementById("b");b.disabled=true;b.innerHTML="<span>Un segundo...</span>";' +
+          'fetch("' + ruta + c + '",{method:"POST"})' +
+          '.then(function(r){return r.text()})' +
+          '.then(function(t){document.body.innerHTML=' +
+          '"<div style=\\"padding:40px 24px;text-align:center;font-size:20px;line-height:1.5\\">"+t+' +
+          '"<br><br><a style=\\"color:#F5B301\\" href=\\"/panel' + c + '\\">Volver al panel</a></div>";})' +
+          '.catch(function(){b.disabled=false;b.innerHTML="<span>Reintentar</span>";});' +
+          '}<\/script>'
+    }));
+  });
+  // POST: esto si hace la accion.
+  app.post(ruta, function (req, res) {
+    if (!claveOk(req)) { log('RECHAZO', 'POST ' + ruta + ' sin clave valida'); return res.status(403).send('clave invalida'); }
+    res.send(op.hacer());
+  });
+}
+
+accionProtegida('/gratis', {
+  titulo: 'Un tiro<br>gratis',
+  bloque: '1 ficha',
+  texto: 'Se activa un tiro en la m\u00e1quina, sin cobrar. Toc\u00e1 el bot\u00f3n s\u00f3lo cuando la persona ya est\u00e9 parada frente a la m\u00e1quina.',
+  boton: 'Dar el tiro gratis',
+  pie: 'Sale enseguida y no se guarda para despu\u00e9s.',
+  frenaSiAviso: true,
+  aviso: function () {
+    // Si la maquina esta muda, la ficha NO se entrega: se queda en la cola y
+    // cae toda junta cuando alguien la prenda, quizas al otro dia y para otra
+    // persona. Ni siquiera mostramos el boton.
+    if (!shellyVivo()) {
+      return 'LA M\u00c1QUINA EST\u00c1 CA\u00cdDA.<br><br>No se puede activar nada: la ficha ' +
+             'quedar\u00eda encolada y caer\u00eda cuando la prendan, tal vez ma\u00f1ana y para otro.' +
+             '<br><br>Que cobren por el billetero mientras tanto.';
+    }
+    return null;
+  },
+  hacer: function () {
+    const ahora = Date.now();
+    if (ahora - ultimoGratis < COOLDOWN_GRATIS_MS) return 'Esper\u00e1 unos segundos antes de otra activaci\u00f3n';
+    if (!shellyVivo()) {
+      log('GRATIS RECHAZADO', 'la maquina esta caida, no se encola la ficha');
+      return 'LA M\u00c1QUINA EST\u00c1 CA\u00cdDA. No se activ\u00f3 nada.';
+    }
+    ultimoGratis = ahora;
+    return agregarFichas(1, 'gratis')
+      ? 'Activado: 1 ficha gratis'
+      : 'No se activ\u00f3 (sistema frenado o tope alcanzado)';
   }
-  ultimoGratis = ahora;
-  const ok = agregarFichas(1, 'gratis');
-  res.send(ok ? 'Activado (1 ficha gratis)' : 'No se activo (sistema frenado o tope alcanzado)');
 });
 
-app.get('/pausa', function (req, res) {
-  if (!claveOk(req)) return res.status(403).send('clave invalida');
-  bloqueado = true;
-  motivoBloqueo = 'pausa manual';
-  pendingActivation = 0;
-  entregaEnVuelo = null;
-  log('PAUSA', 'freno manual activado');
-  res.send('Sistema PAUSADO. No se entregan mas creditos hasta /reanudar');
+accionProtegida('/pausa', {
+  titulo: '\u00bfFrenar<br>todo?',
+  bloque: 'pausa',
+  texto: 'La m\u00e1quina deja de entregar cr\u00e9ditos hasta que la reanudes a mano. Es para cuando larga tiros sola.',
+  boton: 'Frenar la m\u00e1quina', acento: '#E23B36',
+  hacer: function () {
+    bloqueado = true; motivoBloqueo = 'pausa manual';
+    setCola(0); entregaEnVuelo = null;
+    log('PAUSA', 'freno manual activado');
+    return 'Sistema PAUSADO. No se entregan m\u00e1s cr\u00e9ditos hasta reanudar.';
+  }
 });
 
-app.get('/reanudar', function (req, res) {
-  if (!claveOk(req)) return res.status(403).send('clave invalida');
-  bloqueado = false;
-  motivoBloqueo = '';
-  historialFichas = [];
-  pendingActivation = 0;
-  entregaEnVuelo = null;
-  log('REANUDAR', 'sistema reactivado a mano');
-  res.send('Sistema REANUDADO, cola en 0');
+accionProtegida('/reanudar', {
+  titulo: '\u00bfReanudar?',
+  bloque: 'seguir',
+  texto: 'Vuelve a entregar cr\u00e9ditos normalmente y deja la cola en cero.',
+  boton: 'Reanudar',
+  hacer: function () {
+    bloqueado = false; motivoBloqueo = ''; historialFichas = [];
+    setCola(0); entregaEnVuelo = null;
+    log('REANUDAR', 'sistema reactivado a mano');
+    return 'Sistema REANUDADO, cola en 0.';
+  }
 });
 
-app.get('/reset', function (req, res) {
-  if (!claveOk(req)) return res.status(403).send('clave invalida');
-  pendingActivation = 0;
-  entregaEnVuelo = null;
-  log('RESET', 'cola vaciada a mano');
-  res.send('Cola en 0');
+accionProtegida('/reset', {
+  titulo: '\u00bfVaciar<br>la cola?',
+  bloque: 'reset',
+  texto: 'Tira a la basura las fichas que est\u00e1n esperando a caer. Si alguien las pag\u00f3 y todav\u00eda no las recibi\u00f3, las pierde.',
+  boton: 'Vaciar la cola', acento: '#E23B36',
+  hacer: function () {
+    const habia = pendingActivation;
+    setCola(0); entregaEnVuelo = null;
+    log('RESET', 'cola vaciada a mano (habia ' + habia + ')');
+    return 'Cola en 0' + (habia ? ' (se descartaron ' + habia + ')' : '') + '.';
+  }
 });
 
 // ===== CAJA DEL DIA =====
@@ -1750,19 +1904,97 @@ app.get('/admin', function (req, res) {
       'padding:11px 13px;margin-bottom:12px;font-size:14px;color:#FFC9C4">' +
       '<b>Ca\u00eddo ahora</b> \u2014 hace ' + fmt(minutosDe(sem.abierta)) + '</div>';
   }
-  f += '<div class="reparto"><span>Hoy</span><b>' + fmt(hoy.minutos) + ' en ' + hoy.cantidad + (hoy.cantidad === 1 ? ' ca\u00edda' : ' ca\u00eddas') + '</b></div>';
-  f += '<div class="reparto"><span>\u00daltimos 7 d\u00edas</span><b>' + fmt(sem.minutos) + ' en ' + sem.cantidad + '</b></div>';
-  f += '<div class="reparto"><span>Con el bar abierto</span><b>' + fmt(sem.minutosEnHorario) + ' (' + sem.enHorarioDeBar + ')</b></div>';
+  /* ANTES ACA HABIA DOS NUMEROS MENTIROSOS.
+     "Hoy" sumaba TODOS los minutos caidos, incluidas las 14 horas en que el
+     bar esta cerrado: la maquina se apaga a las 3 y se prende a las 17, y eso
+     salia como 14 horas de tiempo muerto todos los dias. Y "con el bar
+     abierto" era peor: marcaba la caida entera como "en horario" si habia
+     EMPEZADO en horario, asi que un apagado de las 3:26 (bar abierto por 4
+     minutos) sumaba sus 14 horas completas.
+     Lo unico que importa son los minutos que la maquina no pudo cobrar CON EL
+     BAR ABIERTO, y separados en las dos cosas que se arreglan distinto:
+     que la prendan tarde, y que se corte con el bar andando. */
+  const minutosAbiertos = function (c) {
+    const fin = c.fin || Date.now();
+    if (MET && MET.minutosAbiertosDe) { try { return MET.minutosAbiertosDe(c.inicio, fin); } catch (e) {} }
+    return c.enHorario ? minutosDe(c) : 0;   // sin el modulo de metricas, lo viejo
+  };
+  const partir = function (lista) {
+    let tarde = 0, corte = 0, nTarde = 0, nCorte = 0;
+    lista.forEach(function (c) {
+      const m = minutosAbiertos(c);
+      if (m <= 0) return;
+      // Si la caida ya venia de antes de abrir, lo que se perdio es apertura
+      // tardia. Si empezo con el bar ya abierto, es un corte en plena noche.
+      if (MET && MET.abiertoEn && !MET.abiertoEn(c.inicio)) { tarde += m; nTarde++; }
+      else { corte += m; nCorte++; }
+    });
+    return { tarde: tarde, corte: corte, nTarde: nTarde, nCorte: nCorte, total: tarde + corte };
+  };
+  const pHoy = partir(hoy.lista), pSem = partir(sem.lista);
+
+  f += '<div class="reparto"><span>Hoy, sin poder cobrar</span><b>' + fmt(pHoy.total) + '</b></div>';
+  f += '<div class="reparto"><span>&nbsp;&nbsp;\u00b7 abrio el bar y no estaba prendida</span><b>' + fmt(pHoy.tarde) + '</b></div>';
+  f += '<div class="reparto"><span>&nbsp;&nbsp;\u00b7 se corto con el bar abierto</span><b>' + fmt(pHoy.corte) + '</b></div>';
+  f += '<div class="reparto"><span>7 d\u00edas, sin poder cobrar</span><b>' + fmt(pSem.total) + '</b></div>';
+  f += '<div class="reparto"><span>&nbsp;&nbsp;\u00b7 arranques tarde</span><b>' + fmt(pSem.tarde) + ' (' + pSem.nTarde + ')</b></div>';
+  f += '<div class="reparto"><span>&nbsp;&nbsp;\u00b7 cortes en plena noche</span><b>' + fmt(pSem.corte) + ' (' + pSem.nCorte + ')</b></div>';
+  f += '<div class="reparto" style="opacity:.6"><span>Apagado de rutina (bar cerrado)</span><b>' + fmt(sem.minutos - pSem.total) + '</b></div>';
   f += '<div class="reparto"><span>Por WiFi</span><b>' + sem.porWifi + ' \u00b7 ' + fmt(sem.minWifi) + '</b></div>';
   f += '<div class="reparto"><span>Por apagado</span><b>' + sem.porApagada + ' \u00b7 ' + fmt(sem.minApagada) + '</b></div>';
+
+  /* A que hora apagan la maquina.
+     El ultimo apagado de cada noche es el de cierre: el que hace el que baja
+     la persiana. Sirve para dos cosas concretas: saber si la estan apagando
+     antes de que cierre el bar (cada minuto ahi es plata que no entra) y
+     tener con que comparar cuando el corte fue de wifi y no de apagado. */
+  const cierres = (function () {
+    const porNoche = {};
+    caidas.forEach(function (c) {
+      if (c.motivo !== 'apagada' || !c.apagada) return;
+      const a = new Date(new Date(c.apagada).toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+      const h = a.getHours() + a.getMinutes() / 60;
+      // Solo el apagado de cierre: entre las 22 y las 8. Uno de las 19 es
+      // otra cosa (se colgo, la reiniciaron) y ensuciaria el promedio.
+      if (h > 8 && h < 22) return;
+      if (a.getHours() < 12) a.setDate(a.getDate() - 1);
+      const k = a.getFullYear() + '-' + (a.getMonth() + 1) + '-' + a.getDate();
+      if (!porNoche[k] || c.apagada > porNoche[k].ts) {
+        porNoche[k] = { ts: c.apagada, min: (h < 12 ? h + 24 : h) * 60, seguro: !!c.seguro };
+      }
+    });
+    return Object.keys(porNoche).sort().slice(-14).map(function (k) { return porNoche[k]; });
+  })();
+
+  f += '<div class="reparto" style="margin-top:14px"><span>A qu\u00e9 hora la apagan</span><b>' +
+    (cierres.length
+      ? (function () {
+          const prom = cierres.reduce(function (a, c) { return a + c.min; }, 0) / cierres.length;
+          const hh = Math.floor(prom / 60) % 24, mm = Math.round(prom % 60);
+          return String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0') +
+                 ' (' + cierres.length + (cierres.length === 1 ? ' noche)' : ' noches)');
+        })()
+      : 'todavia no hay dato') + '</b></div>';
+  if (cierres.length) {
+    f += '<div class="reparto"><span>&nbsp;&nbsp;\u00b7 la ultima vez</span><b>' +
+      horaCorta(cierres[cierres.length - 1].ts) + '</b></div>';
+  } else {
+    f += '<p class="lectura tenue" style="margin-top:6px">Aparece cuando el Shelly ' +
+      'empiece a informar hace cuanto esta prendido (script v8 o mas nuevo). ' +
+      'Sin eso no hay forma de distinguir un apagado de un corte de wifi.</p>';
+  }
 
   f += '<div class="datos" style="margin-top:14px">';
   sem.lista.slice(-6).reverse().forEach(function (c) {
     const d = new Date(c.inicio);
     const cuando = d.toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires',
       hour12: false, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-    const motivo = c.fin === null ? 'sigue ca\u00eddo' : (c.motivo === 'apagada' ? 'la apagaron' : 'se cort\u00f3 el WiFi');
-    f += cuando + ' \u00b7 <b>' + fmt(minutosDe(c)) + '</b> \u00b7 ' + motivo + '<br>';
+    const motivo = c.fin === null ? 'sigue ca\u00eddo'
+      : (c.motivo === 'apagada'
+          ? 'la apagaron' + (c.prendida ? ', volvio ' + horaCorta(c.prendida) : '')
+          : 'se cort\u00f3 el WiFi');
+    f += cuando + ' \u00b7 <b>' + fmt(minutosDe(c)) + '</b> \u00b7 ' + motivo +
+         (c.fin !== null && !c.seguro ? ' <span style="opacity:.5">(deducido)</span>' : '') + '<br>';
   });
   f += '</div>';
   return f;
@@ -1773,7 +2005,30 @@ app.get('/admin', function (req, res) {
 '<div class="datos">' +
 '\u00daltima se\u00f1al \u00b7 <b>' + (segDesdePoll < 0 ? 'nunca' : 'hace ' + segDesdePoll + ' s') + '</b><br>' +
 'Encendida desde \u00b7 <b>' + (ultimoArranqueShelly ? new Date(ultimoArranqueShelly).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) : 'sin dato') + '</b><br>' +
-'Se desconect\u00f3 \u00b7 <b>' + desconexionesHoy + ' ' + (desconexionesHoy === 1 ? 'vez' : 'veces') + '</b><br>' +
+/* "Se desconecto 3 veces" no sirve para decidir nada: no dice cuando, ni
+   cuanto, ni por que, ni si fue con el bar abierto. Todo eso ya esta
+   guardado; lo unico que faltaba era mostrarlo. */
+(function () {
+  const hoy = caidas.filter(function (x) { return (x.fin || Date.now()) >= inicioJornada(); });
+  if (!hoy.length) return 'Se desconect\u00f3 \u00b7 <b>ninguna vez hoy</b><br>';
+  let t = 'Se desconect\u00f3 \u00b7 <b>' + hoy.length + ' ' + (hoy.length === 1 ? 'vez' : 'veces') + ' hoy</b><br>';
+  hoy.slice(-6).reverse().forEach(function (x) {
+    const abierto = (MET && MET.minutosAbiertosDe) ? MET.minutosAbiertosDe(x.inicio, x.fin || Date.now()) : null;
+    const porque = x.fin === null ? 'sigue ca\u00edda'
+      : (x.motivo === 'apagada'
+          ? 'la apagaron' + (x.prendida ? ' \u00b7 volvi\u00f3 ' + horaCorta(x.prendida) : '')
+          : 'se cort\u00f3 el WiFi');
+    t += '&nbsp;&nbsp;\u00b7 ' + horaCorta(x.inicio) + ' \u2192 ' +
+      (x.fin ? horaCorta(x.fin) : 'ahora') +
+      ' \u00b7 <b>' + minutosDe(x) + ' min</b>' +
+      (abierto === null ? '' :
+        (abierto > 0 ? ' <span style="color:#ff9a9c">(' + abierto + ' con el bar abierto)</span>'
+                     : ' <span style="opacity:.55">(bar cerrado)</span>')) +
+      ' \u00b7 ' + porque + (x.fin !== null && !x.seguro ? ' <span style="opacity:.5">(deducido)</span>' : '') +
+      '<br>';
+  });
+  return t;
+})() +
 'Fichas en cola \u00b7 <b>' + pendingActivation + '</b><br>' +
 'Sin confirmar \u00b7 <b>' + (entregaEnVuelo ? entregaEnVuelo.n : 0) + '</b><br>' +
 'QR de Mercado Pago \u00b7 <b>' + (qrCortado ? 'cortado' : 'activo') + '</b><br>' +
@@ -1785,7 +2040,6 @@ app.get('/admin', function (req, res) {
 '<div class="seccion">' +
 '<h2 class="titulo">Ver m\u00e1s</h2>' +
 '<div class="botones">' +
-'<a class="b ancho" style="background:var(--cuero);border-color:var(--cuero)" href="/metricas' + c + '">Panel de m\u00e9tricas</a>' +
 '<a class="b" href="/log">Historial</a>' +
 '<a class="b" href="/caja">Caja detallada</a>' +
 '<a class="b" href="/panel">Panel del bar</a>' +
@@ -1960,12 +2214,11 @@ app.post('/webhook', function (req, res) {
     });
 });
 
-// ===== MODULO DE PINAS =====
-// Va aca: despues de que todo lo de arriba esta definido, antes de escuchar.
-// Si este modulo falla, el cobro sigue funcionando igual.
-// El modulo de metricas. Primero este, porque el resto del server le avisa
-// cosas (la red del Shelly, los arranques, los escaneos de cupon) y conviene
-// que este cargado lo antes posible. Si falla, el cobro sigue andando.
+// ===== MODULO DE METRICAS =====
+// Va primero, porque el resto del server le avisa cosas (la red del Shelly,
+// los arranques, los escaneos de cupon) y conviene que este cargado lo antes
+// posible. Si falla, el cobro sigue andando: MET queda en null y todo lo que
+// lo usa pregunta antes.
 try {
   const montarMetricas = require('./metricas');
   MET = montarMetricas(app, {
@@ -1995,6 +2248,9 @@ try {
   log('METRICAS', 'no se pudo montar el modulo: ' + e.message + ' (el cobro sigue andando)');
 }
 
+// ===== MODULO DE PINAS =====
+// Va aca: despues de que todo lo de arriba esta definido, antes de escuchar.
+// Si este modulo falla, el cobro sigue funcionando igual.
 try {
   const montarPinas = require('./pinas');
   montarPinas(app, {
@@ -2013,7 +2269,13 @@ try {
   log('PINAS', 'no se pudo montar el modulo: ' + e.message + ' (el cobro sigue andando)');
 }
 
-app.listen(process.env.PORT || 3000, '0.0.0.0', async function () {
+/* Si el puerto ya esta ocupado, Node tira un error de red ilegible y el
+   servicio entra en bucle de crasheo. En la practica eso pasa por una sola
+   razon: que el contenido de ESTE archivo haya quedado pegado dentro de
+   metricas.js o de pinas.js. Al cargarlos, arranca un segundo servidor en el
+   mismo puerto y se cae el primero. Mejor decirlo con todas las letras que
+   dejar un volcado de memoria. */
+const servidor = app.listen(process.env.PORT || 3000, '0.0.0.0', async function () {
   log('ARRANQUE', 'Server v10. BASE_URL=' + (BASE_URL || 'FALTA') +
       ' | persistencia=' + (persistenciaOk ? 'SI' : 'NO') +
       ' | eventos recuperados=' + eventosRecuperados +
@@ -2024,4 +2286,19 @@ app.listen(process.env.PORT || 3000, '0.0.0.0', async function () {
   if (!persistenciaOk) log('ALERTA', 'SIN VOLUMEN: ' + motivoSinPersistencia + '. Los cupones y la caja se pierden en cada reinicio.');
   await descubrirCajas();
   await crearTodasLasOrdenes();
+});
+
+if (servidor && servidor.on) servidor.on('error', function (e) {
+  if (e && e.code === 'EADDRINUSE') {
+    console.log('\n' + '='.repeat(64));
+    console.log('EL PUERTO YA ESTA OCUPADO.');
+    console.log('Casi seguro quedo el contenido de server.js pegado dentro de');
+    console.log('metricas.js o de pinas.js. Cada archivo tiene que tener SU');
+    console.log('contenido: metricas.js empieza con "// BPK / BeerPunch - modulo');
+    console.log('de METRICAS" y pinas.js con "modulo de PI\u00d1AS".');
+    console.log('='.repeat(64) + '\n');
+  } else {
+    console.log('ARRANQUE | no se pudo escuchar: ' + (e && e.message));
+  }
+  process.exit(1);
 });
