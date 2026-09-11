@@ -11,7 +11,7 @@
   color-scheme:dark;
   --rojo:#D7252A; --led:#FF2A2A; --oro:#FFD518; --azul:#3D55B8;
   --rosa:#F1437B; --rosaC:#FF8FB1; --teal:#2DD4BF;
-  --texto:#fff; --suave:#C7CDD6; --tenue:#7F8796;
+  --texto:#fff; --suave:#D9DEE7; --tenue:#98A1B0;
   --negra:'Archivo Black',Impact,sans-serif;
   --poster:'Anton','Arial Narrow',sans-serif;
   --cuerpo:'Oswald',sans-serif;
@@ -33,8 +33,8 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
 .marca{font-family:var(--negra);font-size:calc(4.4 * var(--u));line-height:1;letter-spacing:.5px;white-space:nowrap}
 .marca .p{color:var(--rojo)}
 #sub{display:flex;justify-content:space-between;align-items:baseline;margin-top:1.3%;gap:8px}
-#lema{color:var(--oro);letter-spacing:4px;font-weight:700;font-size:calc(1.55 * var(--u));white-space:nowrap}
-#reloj{color:#fff;font-weight:600;letter-spacing:1px;font-size:calc(1.75 * var(--u));white-space:nowrap}
+#lema{color:var(--oro);letter-spacing:3px;font-weight:700;font-size:calc(1.95 * var(--u));white-space:nowrap}
+#reloj{color:#fff;font-weight:600;letter-spacing:1px;font-size:calc(2.05 * var(--u));white-space:nowrap}
 #reloj b{color:var(--oro);font-weight:600}
 .regla{height:2px;margin-top:1.3%;border-radius:2px;
   background:linear-gradient(90deg,var(--rojo),transparent 72%)}
@@ -44,11 +44,11 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
   border-radius:15px;text-align:center;
   background:radial-gradient(ellipse at 50% 0%,rgba(215,37,42,.15),rgba(0,0,0,.35) 74%);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 0 54px -14px rgba(215,37,42,.45)}
-.et{color:var(--suave);letter-spacing:6px;font-weight:700;font-size:calc(1.75 * var(--u))}
+.et{color:var(--suave);letter-spacing:4.5px;font-weight:700;font-size:calc(2.1 * var(--u))}
 #recLed{display:flex;justify-content:center;margin:1% 0;min-height:calc(7.6 * var(--u));align-items:center}
-#recNom{font-family:var(--negra);font-size:calc(2.9 * var(--u));letter-spacing:2px;color:#fff}
+#recNom{font-family:var(--negra);font-size:calc(3.5 * var(--u));letter-spacing:2px;color:#fff}
 #recNom span{font-family:var(--cuerpo);font-weight:500;color:var(--suave);font-size:.62em;letter-spacing:1px}
-#recPie{color:var(--oro);font-weight:700;letter-spacing:4px;font-size:calc(2.1 * var(--u));margin-top:calc(.4 * var(--u))}
+#recPie{color:var(--oro);font-weight:700;letter-spacing:3px;font-size:calc(2.45 * var(--u));margin-top:calc(.4 * var(--u))}
 
 /* ═══ ticker ═══ */
 #ticker{flex:none;margin:1.7% 4.5% 0;height:7.4%;border-radius:11px;overflow:hidden;
@@ -56,12 +56,12 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
   display:flex;align-items:center}
 #ticker .caja{width:100%;padding:0 4%}
 #ticker .top{display:flex;align-items:center;gap:9px}
-#ticker .nom{font-weight:700;letter-spacing:2px;font-size:calc(2.7 * var(--u));white-space:nowrap}
-#ticker .ig{color:var(--suave);font-weight:500;font-size:calc(1.5 * var(--u));flex:1;overflow:hidden;
+#ticker .nom{font-family:var(--poster);font-weight:400;letter-spacing:1px;font-size:calc(3.4 * var(--u));white-space:nowrap}
+#ticker .ig{color:var(--suave);font-weight:600;font-size:calc(1.7 * var(--u));flex:1;overflow:hidden;
   white-space:nowrap;text-overflow:ellipsis}
-#ticker .ctx{color:var(--oro);font-weight:700;letter-spacing:1.5px;font-size:calc(1.55 * var(--u));margin-top:2px;
+#ticker .ctx{color:var(--oro);font-weight:700;letter-spacing:1.2px;font-size:calc(1.9 * var(--u));margin-top:2px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#ticker .idle{width:100%;text-align:center;font-weight:700;letter-spacing:4px;font-size:calc(2.7 * var(--u));color:#fff;line-height:1.15}
+#ticker .idle{width:100%;text-align:center;font-weight:700;letter-spacing:3px;font-size:calc(3.1 * var(--u));color:#fff;line-height:1.15}
 @keyframes entra{0%{transform:translateX(110%);opacity:0}12%{transform:none;opacity:1}100%{transform:none;opacity:1}}
 @keyframes suave{0%{opacity:0;transform:translateY(8px)}15%{opacity:1;transform:none}85%{opacity:1}100%{opacity:0}}
 
@@ -69,21 +69,21 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
 #rank{flex:1;margin:1.7% 4.5% 0;display:flex;flex-direction:column;min-height:0}
 #tabs{display:flex;gap:3px}
 #tabs button{flex:1;padding:1.5% 0;border:none;border-radius:9px 9px 0 0;cursor:default;
-  font-family:var(--cuerpo);font-weight:700;letter-spacing:1px;font-size:calc(1.7 * var(--u));
+  font-family:var(--cuerpo);font-weight:700;letter-spacing:1px;font-size:calc(2.1 * var(--u));
   background:rgba(255,255,255,.06);color:var(--tenue)}
 #tabs button.on{background:var(--oro);color:#000}
 #tabs button.on.fem{background:var(--rosa);color:#fff}
-#tabs button.fem{font-family:var(--fem);font-style:italic;font-size:calc(1.85 * var(--u))}
+#tabs button.fem{font-family:var(--fem);font-style:italic;font-size:calc(2.25 * var(--u))}
 #panel{flex:1;border:1px solid var(--borde);border-top:2px solid var(--oro);border-radius:0 0 13px 13px;
   padding:1.5% 3%;display:flex;flex-direction:column;min-height:0;background:rgba(0,0,0,.3);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 10px 28px -14px rgba(0,0,0,.75)}
 #panel.fem{border-top-color:var(--rosa);
   background:radial-gradient(ellipse at 50% 0%,rgba(241,67,123,.1),rgba(0,0,0,.3) 74%)}
 #premioEt{text-align:center;padding:1% 2%;margin-bottom:1%;border-radius:9px;
-  background:rgba(255,213,24,.09);color:var(--oro);font-weight:700;letter-spacing:1.2px;font-size:calc(1.6 * var(--u))}
+  background:rgba(255,213,24,.09);color:var(--oro);font-weight:700;letter-spacing:1px;font-size:calc(1.95 * var(--u))}
 #panel.fem #premioEt{background:rgba(241,67,123,.12);color:var(--rosa);
-  font-family:var(--fem);font-style:italic;letter-spacing:.3px;font-size:calc(1.95 * var(--u))}
-#cuenta{text-align:center;font-weight:700;letter-spacing:2.5px;font-size:calc(1.55 * var(--u));padding:.4% 0 .8%;color:#fff}
+  font-family:var(--fem);font-style:italic;letter-spacing:.3px;font-size:calc(2.3 * var(--u))}
+#cuenta{text-align:center;font-weight:700;letter-spacing:1.8px;font-size:calc(1.95 * var(--u));padding:.4% 0 .8%;color:#fff}
 #cuenta b{color:var(--oro)}
 #cuenta.urge b{color:var(--led)}
 #filas{flex:1;display:flex;flex-direction:column;justify-content:space-evenly;min-height:0}
@@ -93,12 +93,12 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
 .fil.uno{border-color:rgba(255,213,24,.4)}
 #panel.fem .fil{border-radius:20px;background:rgba(241,67,123,.06)}
 #panel.fem .fil.uno{border-color:rgba(241,67,123,.45)}
-.fil .pos{font-family:var(--negra);width:9%;text-align:center;font-size:calc(2 * var(--u))}
+.fil .pos{font-family:var(--negra);width:9%;text-align:center;font-size:calc(2.9 * var(--u))}
 .fil .dat{flex:1;min-width:0}
-.fil .n{display:block;font-weight:700;letter-spacing:1.4px;font-size:calc(2.2 * var(--u));color:#fff;
+.fil .n{display:block;font-family:var(--poster);font-weight:400;letter-spacing:.6px;font-size:calc(3.6 * var(--u));color:#fff;text-transform:uppercase;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#panel.fem .fil .n{font-family:var(--fem);font-style:italic;letter-spacing:.4px;font-size:calc(2.4 * var(--u))}
-.fil .a{display:block;color:var(--suave);font-weight:500;font-size:calc(1.25 * var(--u))}
+#panel.fem .fil .n{font-family:var(--fem);font-style:italic;font-weight:700;letter-spacing:.2px;font-size:calc(3.5 * var(--u))}
+.fil .a{display:block;color:var(--suave);font-weight:600;font-size:calc(1.5 * var(--u))}
 .fil.vacio{opacity:.42}
 .fil.vacio .n{color:var(--tenue);letter-spacing:3px;font-weight:600}
 
@@ -109,16 +109,16 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
   box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 10px 28px -14px rgba(0,0,0,.75)}
 /* Ritmo vertical: cada bloque tiene su propio aire y ninguno se pega al de al
    lado. Antes el gap era porcentual y con textos largos se comía el espacio. */
-.card .ceja{letter-spacing:3px;font-weight:700;font-size:calc(1.4 * var(--u));text-transform:uppercase;
+.card .ceja{letter-spacing:2.2px;font-weight:700;font-size:calc(1.7 * var(--u));text-transform:uppercase;
   margin-bottom:calc(.9 * var(--u));opacity:.95}
-.card h2{font-family:var(--poster);font-size:calc(3 * var(--u));letter-spacing:.5px;line-height:1.04;
+.card h2{font-family:var(--poster);font-size:calc(3.5 * var(--u));letter-spacing:.5px;line-height:1.04;
   text-transform:uppercase}
 .card .mega{font-family:var(--poster);line-height:1;letter-spacing:1px;margin-top:calc(.6 * var(--u));
   font-size:calc(4.8 * var(--u));text-shadow:0 0 28px currentColor}
 .card .fila2{display:flex;align-items:baseline;gap:calc(1.2 * var(--u));flex-wrap:wrap;justify-content:center;
   margin-top:calc(.7 * var(--u))}
 .card .big{font-family:var(--poster);font-size:calc(2.7 * var(--u));letter-spacing:.4px;line-height:1}
-.card .txt{color:var(--suave);font-weight:600;font-size:calc(1.4 * var(--u));line-height:1.3;margin-top:calc(.9 * var(--u));
+.card .txt{color:var(--suave);font-weight:600;font-size:calc(1.7 * var(--u));line-height:1.3;margin-top:calc(.9 * var(--u));
   max-width:97%}
 /* 14 caracteres en Archivo Black no entran a calc(3.6 * var(--u)): la card mide ~calc(29 * var(--u)) de
    ancho y el texto pedía 31. A calc(2.7 * var(--u)) con el tracking apretado, entra. */
@@ -134,33 +134,41 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
 .card.ap1 .mega{font-size:calc(4 * var(--u));margin-top:calc(.35 * var(--u))}
 .card.ap1 .big{font-size:calc(2.35 * var(--u))}
 .card.ap1 .arroba{font-size:calc(2.35 * var(--u));margin-top:calc(.35 * var(--u))}
-.card.ap1 .txt{font-size:calc(1.25 * var(--u));margin-top:calc(.5 * var(--u))}
+.card.ap1 .txt{font-size:calc(1.55 * var(--u));margin-top:calc(.5 * var(--u))}
 .card.ap1 .fila2{margin-top:calc(.45 * var(--u));gap:calc(.9 * var(--u))}
 .card.ap2 .ceja{font-size:calc(1.05 * var(--u));letter-spacing:1px;margin-bottom:calc(.3 * var(--u))}
 .card.ap2 h2{font-size:calc(2.2 * var(--u))}
 .card.ap2 .mega{font-size:calc(3.3 * var(--u));margin-top:calc(.2 * var(--u))}
 .card.ap2 .big{font-size:calc(2 * var(--u))}
 .card.ap2 .arroba{font-size:calc(2 * var(--u));margin-top:calc(.2 * var(--u))}
-.card.ap2 .txt{font-size:calc(1.1 * var(--u));margin-top:calc(.35 * var(--u))}
+.card.ap2 .txt{font-size:calc(1.45 * var(--u));margin-top:calc(.35 * var(--u))}
 .card.ap2 .fila2{margin-top:calc(.3 * var(--u));gap:calc(.7 * var(--u))}
 .card.ap3 .ceja{font-size:calc(.95 * var(--u));letter-spacing:.5px;margin-bottom:calc(.2 * var(--u))}
 .card.ap3 h2{font-size:calc(1.85 * var(--u))}
 .card.ap3 .mega{font-size:calc(2.7 * var(--u));margin-top:calc(.15 * var(--u))}
 .card.ap3 .big{font-size:calc(1.7 * var(--u))}
 .card.ap3 .arroba{font-size:calc(1.7 * var(--u));margin-top:calc(.15 * var(--u))}
-.card.ap3 .txt{font-size:calc(.95 * var(--u));margin-top:calc(.25 * var(--u))}
+.card.ap3 .txt{display:none}
 .card.ap3 .fila2{margin-top:calc(.25 * var(--u));gap:calc(.5 * var(--u))}
 .vivo{display:inline-flex;align-items:center;gap:5px;background:var(--rojo);border-radius:999px;
   padding:2px 10px;font-weight:700;letter-spacing:1px;font-size:calc(1.4 * var(--u))}
 .vivo i{width:6px;height:6px;border-radius:999px;background:#fff;animation:pal 1.2s ease-in-out infinite}
 @keyframes pal{0%,100%{opacity:1}50%{opacity:.35}}
-#qr{flex:none;width:36%;border-radius:17px;padding:2.4% 2%;display:flex;flex-direction:column;
+#qr{flex:none;width:36%;border-radius:17px;padding:1.6% 1.6%;display:flex;flex-direction:column;
   align-items:center;justify-content:center;gap:2%;border:1px dashed rgba(45,212,191,.55);
   background:radial-gradient(120% 100% at 50% -20%,rgba(45,212,191,.17),rgba(7,9,16,.75) 66%),#080a12}
 #qr svg{background:#fff;border-radius:8px;display:block}
-#qr .hueco{flex:1;min-height:0;width:100%;display:flex;align-items:center;justify-content:center}
-#qr .t1{font-family:var(--poster);color:var(--teal);font-size:calc(2.1 * var(--u));line-height:1.02;margin-top:calc(.5 * var(--u))}
-#qr .t2{color:#fff;font-weight:600;font-size:calc(1.25 * var(--u));letter-spacing:.8px;line-height:1.15;margin-top:2px}
+#qr .hueco{flex:1;min-height:56%;width:100%;display:flex;align-items:center;justify-content:center}
+#qr .t1{font-family:var(--poster);color:var(--teal);font-size:calc(2.25 * var(--u));line-height:1.02;margin-top:calc(.5 * var(--u))}
+#qr .t2{color:#fff;font-weight:700;font-size:calc(1.55 * var(--u));letter-spacing:.8px;line-height:1.15;margin-top:2px}
+/* Durante la hora siguiente al premio, ese mismo recuadro deja de ser el de
+   cargar la pina y pasa a ser el de retirar el premio. Cambia de color para
+   que se note de lejos que dice otra cosa. */
+#qr.premio{border-style:solid;border-color:rgba(255,213,24,.75);
+  background:radial-gradient(120% 100% at 50% -20%,rgba(255,213,24,.2),rgba(7,9,16,.75) 66%),#080a12;
+  animation:latePremio 2.6s ease-in-out infinite}
+#qr.premio .t1{color:var(--oro)}
+@keyframes latePremio{0%,100%{box-shadow:0 0 0 0 rgba(255,213,24,.35)}50%{box-shadow:0 0 calc(2.6 * var(--u)) calc(.5 * var(--u)) rgba(255,213,24,.22)}}
 
 /* ═══ overlays ═══ */
 .over{position:absolute;inset:0;z-index:40;display:flex;flex-direction:column;
@@ -189,10 +197,15 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
 .pk .cant{font-family:var(--poster);font-size:calc(2.9 * var(--u));letter-spacing:.4px;color:#fff;margin-top:1%}
 .pk .prec{font-family:var(--poster);font-size:calc(4.4 * var(--u));line-height:1;color:var(--oro);
   text-shadow:0 0 26px rgba(255,213,24,.35)}
-.pk .cu{color:var(--suave);font-weight:600;font-size:calc(1.55 * var(--u))}
+.pk .cu{color:var(--suave);font-weight:600;font-size:calc(1.85 * var(--u))}
 .pk svg{background:#fff;border-radius:8px;display:block}
-.pk .esc{color:var(--suave);font-weight:600;letter-spacing:2px;font-size:calc(1.25 * var(--u))}
+.pk .esc{color:var(--suave);font-weight:700;letter-spacing:1.5px;font-size:calc(1.55 * var(--u))}
 @keyframes late{0%,100%{transform:none}50%{transform:scale(1.03)}}
+/* resplandor del cartel destacado: respira sin mover nada de lugar */
+.pk .aura{position:absolute;inset:0;border-radius:18px;pointer-events:none;
+  animation:aura 2.2s ease-in-out infinite}
+@keyframes aura{0%,100%{opacity:.3}50%{opacity:1}}
+.pk .tag.urge{animation:brilla 1.15s ease-in-out infinite}
 .qrEnv{position:relative;border-radius:9px;overflow:hidden}
 .barrido{position:absolute;inset:0;pointer-events:none;
   background:linear-gradient(105deg,transparent 34%,rgba(255,255,255,.85) 50%,transparent 66%);
@@ -288,14 +301,26 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
    BEERPUNCH · TÓTEM
    Sin React. Un solo archivo. La verdad vive en el servidor.
    ══════════════════════════════════════════════════════════════ */
+/* ────────── modo espejo ──────────
+   La misma pagina sirve para dos cosas distintas. En la TV va girada, a
+   pantalla completa, con sonido y moviendose sola un pixel cada tanto para
+   no quemar el panel. Metida en el admin para mirarla o grabarla, todo eso
+   estorba: tiene que entrar derecha en un celular vertical, sin el cartel
+   de "tocá OK", sin sonido (si no suena dos veces) y quieta, porque el
+   movimiento anti-quemado se ve como un temblor en la grabacion.
+   Se activa con ?espejo=1 al final de la direccion. No cambia ningun dato:
+   es exactamente la misma pantalla, con la misma conexion en vivo. */
+const ESPEJO = /[?&]espejo=1/.test(location.search);
+
 const CFG = {
   API:'',                       // '' = mismo origen. Ej: 'https://beerpunch.onrender.com'
-  ROTAR_90:true,                // true si el TV Box NO rota la salida de video
-  SONIDO:true,
+  ROTAR_90:!ESPEJO,             // true si el TV Box NO rota la salida de video
+  SONIDO:!ESPEJO,
 
   IG:'@beerpunch.mdz',
   URL_IG:'https://instagram.com/beerpunch.mdz',
   URL_CARGA:'',                 // '' = usa el origen + /m
+  URL_PREMIO:'',                // '' = usa el origen + /premio (el QR del rey)
 
   /* Payloads EMV de Mercado Pago, idénticos a los del cartel impreso.
      Formato EMV interoperable: los lee cualquier billetera, no solo MP. */
@@ -316,6 +341,7 @@ const T = {                     // tiempos, todo en un solo lugar
   packsCada:60000, packsDura:20000,
   revancha:7000, recordCierra:5600, golpeVisible:60000,
   ruletaGana:8000, ruletaPierde:4200,
+  reyDura:26000,                // el anuncio del rey: tiene que dar tiempo a sacar el celular y escanear
   antiQuema:60000
 };
 
@@ -614,8 +640,9 @@ const S = {
   record:{score:0,nombre:null}, casa:{score:0,nombre:null},
   piñas:0,
   ultimo:null, ultimoTs:0,
-  tab:0, card:0, headerAlt:0,
+  tab:0, pag:0, vista:0, card:0, headerAlt:0,
   ocupado:false, packsAbierto:false,
+  rey:null, reina:null,     /* los que ganaron el premio de la hora de entrega */
   conexion:'…'
 };
 const apertura=()=>!S.record.score;
@@ -716,7 +743,7 @@ window.addEventListener('resize',medir); medir();
   }));
 
 /* ─── anti burn-in: 8 h por noche queman el panel ─── */
-setInterval(()=>{S.qx=Math.round((Math.random()-.5)*8);S.qy=Math.round((Math.random()-.5)*8);medir();},T.antiQuema);
+if(!ESPEJO)setInterval(()=>{S.qx=Math.round((Math.random()-.5)*8);S.qy=Math.round((Math.random()-.5)*8);medir();},T.antiQuema);
 
 /* ─── que el TV Box no se duerma ───
    Dos cinturones. El moderno (Wake Lock) cuando el navegador lo tiene, y
@@ -724,7 +751,8 @@ setInterval(()=>{S.qx=Math.round((Math.random()-.5)*8);S.qy=Math.round((Math.ran
    como "el tipo esta mirando algo" y no dispara el protector de pantalla
    ni el apagado. Solo con el Wake Lock, en la practica, igual terminaba
    saliendo el fondo de pantalla y apagandose despues de un rato. */
-(async function(){let wl=null;
+(async function(){if(ESPEJO)return;   // en el celular no hace falta y gasta bateria
+  let wl=null;
   const pedir=async()=>{try{if(navigator.wakeLock)wl=await navigator.wakeLock.request('screen');else return;
     wl.addEventListener('release',()=>{wl=null;});}catch(e){}};
   pedir();
@@ -735,6 +763,7 @@ setInterval(()=>{S.qx=Math.round((Math.random()-.5)*8);S.qy=Math.round((Math.ran
   setInterval(()=>{if(!wl)pedir();},120000);})();
 
 (function(){
+  if(ESPEJO)return;   // el video anti-reposo en un celular solo gasta bateria
   const v=document.createElement('video');
   v.id='despierto'; v.muted=true; v.playsInline=true; v.loop=true; v.autoplay=true;
   v.setAttribute('preload','auto');
@@ -872,7 +901,7 @@ setInterval(()=>{idleIdx++;pintarTicker();},T.idle);
 
 /* ────────── ranking ────────── */
 const TABS=[
-  {id:'noche',   label:'NOCHE',    premio:'GANADOR DE LA NOCHE: 1 BIRRA'},
+  {id:'noche',   label:'NOCHE',    premio:'GANADOR DE LA NOCHE: 1 BIRRITA'},
   {id:'mujeres', label:'Mujeres',  fem:true, premio:'EL MEJOR PUNTAJE DE LA NOCHE SE LLEVA LA BIRRITA'},
   {id:'historico',label:'HISTÓRICO',premio:CFG.PREMIO_RECORD_ACTIVO
       ?'ROMPÉ EL RÉCORD DE LA CASA: 10 PINTAS'
@@ -890,6 +919,30 @@ function pintarTabs(){
    Cuando quedan pocos libres, se ponen en alerta: "quedan 2 lugares". */
 function cupos(n){ return Math.max(5, Math.min(CFG.TOP, n+2)); }
 
+/* Cuantos renglones se ven A LA VEZ. Antes se metian los 10 en el mismo alto
+   y cada nombre terminaba midiendo 1,6% de la pantalla: a cuatro metros, con
+   el bar a media luz, eso no se lee. Cinco renglones ocupan el mismo espacio
+   con la letra al doble. Los puestos 6 al 10 no desaparecen: la tabla pasa de
+   pagina sola, igual que cambian las pestanas. */
+const FILAS_VISIBLES=5;
+function paginasDe(idTab){
+  const n=cupos((S.rk[idTab]||[]).length);
+  return Math.max(1,Math.ceil(n/FILAS_VISIBLES));
+}
+/* La rotacion recorre pestana+pagina: si el ranking de la noche tiene 8
+   personas, la pestana NOCHE se queda el doble de tiempo (una vuelta para
+   cada pagina) y las otras no pierden su turno. */
+function vistaSiguiente(){
+  const v=[];
+  TABS.forEach(function(t,i){
+    const p=paginasDe(t.id);
+    for(let k=0;k<p;k++) v.push({tab:i,pag:k});
+  });
+  S.vista=(S.vista+1)%v.length;
+  const a=v[S.vista]||v[0];
+  S.tab=a.tab; S.pag=a.pag;
+}
+
 function pintarRanking(){
   const t=TABS[S.tab], fem=!!t.fem;
   $('#panel').className=fem?'fem':'';
@@ -898,7 +951,13 @@ function pintarRanking(){
 
   if(t.id==='noche'||t.id==='mujeres'){
     const e=entrega(); c.style.display='block'; c.className=e.urge?'urge':'';
-    c.innerHTML=e.pasado?'PREMIO ENTREGADO — ARRANCA UNA NOCHE NUEVA'
+    /* Cuando pasó la hora ya sabemos quién ganó: decirlo vale más que el
+       genérico de antes, y le recuerda al ganador que lo tiene que ir a
+       buscar. En la pestaña de mujeres se nombra a la reina. */
+    const gana=fem?S.reina:S.rey;
+    c.innerHTML=e.pasado
+      ?(gana?`GANÓ <b>${esc(gana.nombre)}</b> — ${gana.entregado?'PREMIO ENTREGADO':'PASÁ POR LA CAJA A BUSCARLO'}`
+            :'PREMIO ENTREGADO — ARRANCA UNA NOCHE NUEVA')
       :`PREMIO A LAS ${e.label} — FALTAN <b>${e.h}H ${String(e.m).padStart(2,'0')}M</b>`;
   }else c.style.display='none';
 
@@ -908,6 +967,11 @@ function pintarRanking(){
   const vis=cupos(lista.length);
   const libres=vis-lista.length;
   const alerta=vis>=8&&libres>0;
+  const totalPag=Math.max(1,Math.ceil(vis/FILAS_VISIBLES));
+  if(S.pag>=totalPag)S.pag=0;
+  const desde=S.pag*FILAS_VISIBLES;
+  const hasta=Math.min(vis,desde+FILAS_VISIBLES);
+  const ultimaPag=S.pag===totalPag-1;
 
   /* Se dibuja con un factor de escala. Si el conjunto (filas + los dos avisos
      de abajo) no entra en el alto del panel, se vuelve a dibujar mas chico.
@@ -916,13 +980,16 @@ function pintarRanking(){
   const dibujar=(k,ap)=>{
     f.innerHTML='';
     f.style.setProperty('--apr',(ap==null?k:ap).toFixed(3));
-    const fs=((2.35-(vis-5)*0.135)*k).toFixed(2);   // el renglón se achica al abrirse más cupos
-    const fled=(2.75-(vis-5)*0.14)*k;
-    for(let i=0;i<vis;i++){
+    /* Ya no hace falta achicar segun cuanta gente hay: en pantalla siempre
+       hay cinco renglones, midan lo que midan. El factor k solo entra si un
+       nombre larguisimo no entra, y baja muy poco. */
+    const fs=Math.max(2.4,3.6*k).toFixed(2);
+    const fled=Math.max(2.4,3.5*k);
+    for(let i=desde;i<hasta;i++){
       const e=lista[i];
       const row=cre('div','fil'+(i===0&&e?' uno':'')+(e?'':' vacio')+(!e&&alerta?' alerta':''));
       const pos=cre('span','pos',String(i+1));
-      pos.style.fontSize='calc('+(2*k)+' * var(--u))';
+      pos.style.fontSize='calc('+Math.max(2,2.9*k)+' * var(--u))';
       pos.style.color=e?(i===0?oro:i===1?'#cbd5e1':i===2?'#b45309':'#4b5563'):(alerta?'#FF2A2A':'#3a4150');
       row.appendChild(pos);
       const dat=cre('div','dat');
@@ -934,9 +1001,9 @@ function pintarRanking(){
          al que se puede entrar. */
       if(e&&e.ig){
         const a=cre('span','a');
-        a.style.fontSize='calc('+(1.25*k)+' * var(--u))';
+        a.style.fontSize='calc('+Math.max(1.35,1.5*k)+' * var(--u))';
         const ar=String(e.ig).trim().replace(/^@+/,'');
-        a.innerHTML='<span style="display:inline-block;width:calc('+(1.25*k)+' * var(--u));height:calc('+(1.25*k)+
+        a.innerHTML='<span style="display:inline-block;width:calc('+Math.max(1.35,1.5*k)+' * var(--u));height:calc('+Math.max(1.35,1.5*k)+
           ' * var(--u));vertical-align:calc(-0.18 * var(--u));margin-right:calc(.35 * var(--u))">'+igSVG()+'</span>@'+
           esc(ar);
         dat.appendChild(a);
@@ -947,13 +1014,14 @@ function pintarRanking(){
     }
     /* El que quedó justo afuera del top 5 es el que más cerca está de comprar
        otro tiro. Se le dice el número exacto que le falta. */
-    if(t.id!=='historico' && lista.length>=5 && lista[4]){
+    const avisosCaben = k>=0.92 && (ap==null?k:ap)>=0.55;
+    if(avisosCaben && t.id!=='historico' && S.pag===0 && lista.length>=5 && lista[4]){
       const corte=lista[4].score;
       const af=cre('div','avisoCupo','CON '+(corte+1)+' PUNTOS ENTRÁS AL TOP 5');
       af.style.color='var(--oro)';
       f.appendChild(af);
     }
-    if(alerta){
+    if(avisosCaben&&alerta&&ultimaPag){
       const av=cre('div','avisoCupo',
         libres===1?'QUEDA 1 LUGAR EN EL TOP 10':`QUEDAN ${libres} LUGARES EN EL TOP 10`);
       f.appendChild(av);
@@ -968,7 +1036,7 @@ function pintarRanking(){
   for(let i=1;i<=8 && noEntra();i++) dibujar(1,Math.max(0.2,1-0.1*i));
   for(let i=1;i<=14 && noEntra();i++) dibujar(Math.max(0.42,1-0.05*i),0.2);
 }
-setInterval(()=>{if(S.ocupado||S.packsAbierto)return;S.tab=(S.tab+1)%TABS.length;pintarTabs();pintarRanking();},T.tab);
+setInterval(()=>{if(S.ocupado||S.packsAbierto)return;vistaSiguiente();pintarTabs();pintarRanking();},T.tab);
 
 /* ────────── zona baja: cards rotativas ────────── */
 /* glifo oficial de Instagram con su degradé de marca */
@@ -1055,7 +1123,11 @@ function pintarCard(){
     const riesgo=(S.card%3===2)?cardEnRiesgo():null;
     return riesgo || CARDS[S.card%CARDS.length]();
   };
-  if(esUltimaHora())      d=cardUltimaHora();
+  /* Ya hay rey: uno de cada dos carteles es el suyo, hasta que cierra. Es el
+     único que todavía tiene algo pendiente que hacer (ir a buscarlo). */
+  const rey=(S.rey&&S.card%2===0)?cardRey():null;
+  if(rey)                 d=rey;
+  else if(esUltimaHora())      d=cardUltimaHora();
   /* El happy manda, pero uno de cada dos. Antes, entre las 17 y las 21 era
      el UNICO cartel: las otras tres no se veian nunca, justo en las cuatro
      horas en que el bar se llena. */
@@ -1131,19 +1203,48 @@ function acomodarCard(c){
   }
 }
 setInterval(()=>{if(S.ocupado||S.packsAbierto)return;S.card++;pintarCard();},T.card);
+/* El recuadro del QR tiene que cambiar solo al coronar y volver solo cuando
+   se cumple la hora, sin que nadie toque nada. */
+let qrEnModoPremio=false;
+setInterval(()=>{
+  const ahora=!!reyVigente();
+  if(ahora!==qrEnModoPremio){ qrEnModoPremio=ahora; pintarQR(); }
+},20000);
 
 /* ────────── QR de carga ────────── */
+/* Durante la hora siguiente a la entrega del premio, este recuadro cambia de
+   cartel: deja de invitar a cargar una pina y pasa a ser la unica forma de
+   retirar el premio. Es el lugar mas grande y mas fijo que tiene el totem, y
+   a esa hora ya no hay ranking que ganar: lo unico que falta es que el que
+   gano vaya a buscar su birrita. */
+const REY_VENTANA_MS=60*60*1000;
+function reyVigente(){
+  const r=S.rey;
+  if(!r||!r.ts)return null;
+  if(r.entregado&&(!S.reina||S.reina.entregado))return null;   // ya lo retiraron
+  if(Date.now()-r.ts>REY_VENTANA_MS)return null;
+  return r;
+}
 function pintarQR(){
-  const url=CFG.URL_CARGA||(location.origin+'/m');
+  const rey=reyVigente();
+  const url=rey
+    ? (CFG.URL_PREMIO||(location.origin+'/premio'))
+    : (CFG.URL_CARGA||(location.origin+'/m'));
   const q=$('#qr'); q.innerHTML='';
+  q.classList.toggle('premio',!!rey);
   /* Primero el texto, despues se mide lo que sobra y el QR se dibuja de ese
      tamano. Antes era una medida fija que dejaba la mitad del recuadro vacio:
      este es el QR con el que la gente carga su pina, tiene que leerse parado
      al lado de la maquina, no pegado a la pantalla. */
   const hueco=cre('div','hueco'); q.appendChild(hueco);
   const t=cre('div'); t.style.cssText='text-align:center;flex:none';
-  t.appendChild(cre('div','t1','TU NOMBRE\nEN PANTALLA')).style.whiteSpace='pre-line';
-  t.appendChild(cre('div','t2','ESCANEÁ Y\nCARGÁ TU PIÑA')).style.whiteSpace='pre-line';
+  if(rey){
+    t.appendChild(cre('div','t1','¿GANASTE?\nESCANEÁ')).style.whiteSpace='pre-line';
+    t.appendChild(cre('div','t2','TU CÓDIGO PARA LA CAJA')).style.whiteSpace='pre-line';
+  }else{
+    t.appendChild(cre('div','t1','TU NOMBRE\nEN PANTALLA')).style.whiteSpace='pre-line';
+    t.appendChild(cre('div','t2','ESCANEÁ Y CARGÁ')).style.whiteSpace='pre-line';
+  }
   q.appendChild(t);
   const r=hueco.getBoundingClientRect();
   const lado=Math.floor(Math.min(r.width,r.height));
@@ -1156,7 +1257,20 @@ function pintarQR(){
    cartel estaría prometiendo algo que la máquina no da. */
 function preciosAhora(){
   const lista=PRECIOS.map(x=>Object.assign({},x));
-  if(!esHappy()){
+  if(esHappy()){
+    /* Hasta las 21, $2.000 son DOS tiros. Antes el cartel decia "1 TIRO" y
+       abajo aclaraba "pagas 1, tiras 2": a cuatro metros nadie lee la
+       aclaracion, y el que la lee tiene que hacer la cuenta. Ahora el cartel
+       dice directamente lo que te llevas. */
+    lista[0].muestra=2;
+    lista[0].nota='$1.000 cada tiro';
+    lista[0].extra='';
+    /* Y es EL cartel destacado mientras dura: es la unica oferta que se vence.
+       El de 8 tiros suelta el destaque hasta las 21, porque dos carteles
+       gritando al mismo tiempo es lo mismo que ninguno. */
+    lista[0].hero=true; lista[0].urge=true;
+    lista[2].hero=false;
+  }else{
     lista[0].tag='PARA PROBAR';   // decia "1 TIRO", igual que el titulo de abajo: repetir no suma
     lista[0].color='#9CA3AF';
     lista[0].nota='$2.000 el tiro';
@@ -1214,11 +1328,20 @@ function pintarPacks(){
       card.style.borderColor=d.color;
       card.style.background=`radial-gradient(120% 90% at 50% -10%,${d.color}${d.hero?'33':'1f'},rgba(7,9,16,.9) 62%),#07090f`;
       card.style.boxShadow=`0 0 ${d.hero?46:30}px ${d.hero?'-12':'-22'}px ${d.color}`;
-      if(d.hero)card.style.animation='late 2.6s ease-in-out infinite';
+      if(d.hero){
+        /* Antes el destacado latia agrandandose, y eso chocaba con el foco que
+           recorre las tarjetas (los dos mueven lo mismo). Ahora respira un
+           resplandor aparte: no se pisan y ademas es mas liviano. */
+        const aura=cre('span','aura');
+        aura.style.boxShadow='0 0 calc(5 * var(--u)) calc(.6 * var(--u)) '+d.color;
+        card.appendChild(aura);
+      }
       const tag=cre('span','tag',d.tag);
+      if(d.urge)tag.classList.add('urge');   // en happy, la pastilla titila
       tag.style.cssText+=`background:${d.color};color:${textoSobre(d.color)}`;
       card.appendChild(tag);
-      card.appendChild(cre('div','cant',`${d.n} ${d.n===1?'TIRO':'TIROS'}`));
+      const cuantos=d.muestra||d.n;
+      card.appendChild(cre('div','cant',`${cuantos} ${cuantos===1?'TIRO':'TIROS'}`));
       card.appendChild(cre('div','prec',d.precio));
       const nota=cre('div','cu',d.nota); if(d.extra){nota.textContent=d.nota+' · '+d.extra;} card.appendChild(nota);
       const link=CFG.PAGO[d.n];
@@ -1487,6 +1610,96 @@ function llegaRuleta(d){
   overRuleta(d);
 }
 
+/* ────────── el rey de la noche (premio de las 3) ────────── */
+/* Lo importante acá no es el nombre: es la instrucción. Si el que ganó no
+   entiende que tiene que ir a la caja, el premio no se retira y la mecánica
+   no sirvió para nada. Por eso "ANDÁ A LA CAJA" va tan grande como el nombre
+   y se aclara que se pide por el apodo, que es lo único que la caja ve. */
+function overRey(d){
+  const previa=$('.over'); if(previa)previa.remove();
+  S.ocupado=true; recordSonido();
+  const o=cre('div','over');
+  o.style.cssText+='background:#04050a;animation:estrobo .35s ease 2';
+  o.innerHTML=
+    '<div style="position:absolute;inset:0;pointer-events:none;background:radial-gradient(120% 75% at 50% 40%,rgba(255,213,24,.16),transparent 66%)"></div>'+
+    '<div style="display:flex;flex-direction:column;align-items:center;animation:aparece .5s cubic-bezier(.22,1,.36,1);text-align:center">'+
+      '<div class="rl" style="color:var(--oro);font-weight:800;letter-spacing:calc(.5 * var(--u));font-size:calc(2.1 * var(--u))">SON LAS '+entrega().label+' · CERRÓ EL RANKING</div>'+
+      '<div class="rl" style="font-family:var(--poster);color:#fff;font-size:calc(4.6 * var(--u));line-height:1;margin-top:calc(1.4 * var(--u))">EL REY DE LA NOCHE</div>'+
+      '<div class="rl" style="font-family:var(--negra);color:var(--oro);letter-spacing:2px;font-size:calc(7.6 * var(--u));line-height:1;margin-top:calc(1.2 * var(--u));text-shadow:0 0 calc(3.4 * var(--u)) rgba(255,213,24,.45)">'+esc(d.nombre||'ANÓNIMO')+'</div>'+
+      '<div class="rl" style="color:var(--suave);font-weight:700;letter-spacing:calc(.3 * var(--u));font-size:calc(2 * var(--u));margin-top:calc(.8 * var(--u))">CON '+(d.score|0)+' PUNTOS</div>'+
+      (d.reina
+        ? '<div class="rl" style="margin-top:calc(1.6 * var(--u));color:#F1437B;font-weight:800;letter-spacing:calc(.35 * var(--u));font-size:calc(1.9 * var(--u))">REINA DE LA NOCHE · '+
+          esc(d.reina.nombre||'')+' CON '+(d.reina.score|0)+' · TAMBIÉN SE LLEVA LA SUYA</div>'
+        : '')+
+      '<div style="margin-top:calc(2.2 * var(--u));border-top:1px solid #2a2f3c;padding-top:calc(1.8 * var(--u));display:flex;align-items:center;gap:calc(3 * var(--u))">'+
+        /* El QR y la instruccion, uno al lado del otro. El QR es la parte
+           importante: el codigo no puede salir en la pantalla (lo lee todo el
+           bar), asi que el que gano lo tiene que ir a buscar a su propio
+           celular. Escanea, y la pagina le contesta a el solo. */
+        '<div id="qrRey" style="flex:none;background:#fff;padding:calc(1 * var(--u));border-radius:calc(1 * var(--u));line-height:0"></div>'+
+        '<div style="text-align:left">'+
+          '<div class="rl2" style="font-family:var(--poster);color:var(--rojo);font-size:calc(4.4 * var(--u));line-height:1">SE GANÓ '+esc(d.premio||'UN PREMIO')+'</div>'+
+          '<div class="rl2" style="font-family:var(--negra);color:#fff;letter-spacing:calc(.2 * var(--u));font-size:calc(2.7 * var(--u));margin-top:calc(1 * var(--u))">¿GANASTE? ESCANEÁ ACÁ</div>'+
+          '<div class="rl2" style="color:var(--suave);font-weight:700;letter-spacing:calc(.2 * var(--u));font-size:calc(1.8 * var(--u));margin-top:calc(.6 * var(--u))">TE SALE TU CÓDIGO · MOSTRALO EN LA CAJA</div>'+
+          '<div class="rl2" style="color:var(--tenue);font-weight:700;letter-spacing:calc(.2 * var(--u));font-size:calc(1.6 * var(--u));margin-top:calc(.5 * var(--u))">O ANDÁ A LA CAJA Y DECÍ TU APODO</div>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  app.appendChild(o);
+  const cajaQR=$('#qrRey',o);
+  if(cajaQR){
+    const q=qrSVG(CFG.URL_PREMIO||(location.origin+'/premio'),Math.round(UPX*19),2);
+    if(q)cajaQR.appendChild(q); else cajaQR.parentNode.removeChild(cajaQR);
+  }
+  /* Cada renglón en UNA línea. Partido en dos ("ANDÁ A LA CAJA Y DECÍ / TU
+     APODO") se lee peor de lejos, que es como se lo lee: desde la barra. Se
+     mide el renglón ya dibujado y se lo achica hasta que entre, así funciona
+     igual con "NACHO" que con un apodo de 14 letras y en cualquier tele. */
+  /* Ojo con medir acá: el tótem está girado 90°, así que getBoundingClientRect
+     devuelve la caja YA ROTADA y el ancho sale donde uno espera el alto. Hay
+     que usar scrollWidth, que es la medida de maquetado y no mira la rotación.
+     Y hay que compararla contra el ancho de la pantalla, no contra el del
+     propio renglón: está centrado en una columna flex, así que se ensancha
+     con su texto y medirlo contra sí mismo no detecta nada. */
+  const achicar=function(sel,tope){
+    o.querySelectorAll(sel).forEach(function(e){
+      e.style.whiteSpace='nowrap';
+      let f=parseFloat(getComputedStyle(e).fontSize), guarda=0;
+      while(e.scrollWidth>tope && f>10 && guarda++<40){
+        f*=0.94; e.style.fontSize=f+'px';
+      }
+    });
+  };
+  achicar('.rl', o.clientWidth*0.94);
+  /* Las de abajo comparten el renglon con el QR, asi que su tope no es la
+     pantalla entera: es lo que sobra al costado del QR. */
+  const anchoQR=cajaQR&&cajaQR.parentNode?cajaQR.offsetWidth+UPX*3:0;
+  achicar('.rl2', o.clientWidth*0.94-anchoQR);
+  campanaSonido(); papeles();
+  setTimeout(function(){o.remove();S.ocupado=false;},T.reyDura);
+}
+
+/* Y después del anuncio queda dando vueltas en la rotación de carteles: el
+   que llega 3:20 tiene que enterarse igual de que ese premio existe, porque
+   es lo que lo hace quedarse la próxima. */
+function cardRey(){
+  /* Si hay reina y todavía no retiró, se turnan: la mitad de las veces sale
+     ella. El que ya retiró deja de ocupar lugar. */
+  const pend=[];
+  if(S.rey)  pend.push({...S.rey, fem:false});
+  if(S.reina)pend.push({...S.reina,fem:true});
+  const sinRetirar=pend.filter(x=>!x.entregado);
+  const lista=sinRetirar.length?sinRetirar:pend;
+  if(!lista.length)return null;
+  const r=lista[Math.floor(S.card/2)%lista.length];
+  return { ceja:r.fem?'La birrita de las mujeres':'El premio de la noche',
+    color:r.fem?'#F1437B':'#FFD518',
+    titulo:r.fem?'REINA DE LA NOCHE':'REY DE LA NOCHE', destacado:r.nombre,
+    txt: r.entregado
+      ? `se llevó ${r.premio} con ${r.score} puntos`
+      : `${r.premio} · andá a la caja y decí tu apodo` };
+}
+
 function overRecord(hit,previo){
   S.ocupado=true; recordSonido();
   const o=cre('div','over');
@@ -1525,6 +1738,15 @@ function aplicarEstado(e,deCache){
   if(e.record)S.record={score:e.record.score||0,nombre:e.record.nombre||null};
   if(typeof e.piñas==='number')S.piñas=e.piñas;
   else if(typeof e.pinasHoy==='number')S.piñas=e.pinasHoy;
+  /* El rey viaja en el estado, no solo en el aviso: si el TV Box se reinicia
+     a las 3:10 tiene que seguir mostrando quién ganó. */
+  S.rey=e.rey||null; S.reina=e.reina||null;
+  /* Si el aparato se reinicio despues de las 3, se entera por acá y el
+     recuadro del QR tiene que quedar igual que si hubiera visto el anuncio. */
+  if(typeof pintarQR==='function'){
+    const m=!!reyVigente();
+    if(m!==qrEnModoPremio){ qrEnModoPremio=m; pintarQR(); }
+  }
   pintarRecord(); pintarRanking(); pintarLema();
 }
 function llegaGolpe(g){
@@ -1555,6 +1777,11 @@ function conectar(){
     es.addEventListener('golpe', ev=>{try{llegaGolpe(JSON.parse(ev.data));}catch(e){}});
     es.addEventListener('record',ev=>{try{llegaGolpe({...JSON.parse(ev.data),esRecord:true});}catch(e){}});
     es.addEventListener('ruleta',ev=>{try{llegaRuleta(JSON.parse(ev.data));}catch(e){}});
+    es.addEventListener('rey',   ev=>{try{const d=JSON.parse(ev.data);
+      S.rey={nombre:d.nombre,score:d.score,premio:d.premio,entregado:false,ts:Date.now()};
+      S.reina=d.reina?{nombre:d.reina.nombre,score:d.reina.score,premio:d.reina.premio,entregado:false}:null;
+      qrEnModoPremio=true; pintarQR();
+      overRey(d);}catch(e){}});
     es.onerror=()=>{try{es.close();}catch(e){} reintentar();};
   };
   const reintentar=()=>{
@@ -1605,6 +1832,7 @@ setTimeout(function(){ try{ armarRueda(); }catch(e){} }, 4000);
 (function(){
   const capa=document.getElementById('arranque');
   if(!capa)return;
+  if(ESPEJO){ capa.remove(); return; }
   /* Esta pantalla es un cuadro aparte, fuera de #app: si no se gira igual
      que #app, en la TV rotada se leeria de costado justo el cartel que
      hay que tocar primero. */
