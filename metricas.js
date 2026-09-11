@@ -183,6 +183,7 @@ module.exports = function montarMetricas(app, ctx) {
   const F_ESCANEOS = path.join(DATA_DIR, 'escaneos.json');
   const F_ARRANQUE = path.join(DATA_DIR, 'arranque.json');
   const F_PINAS    = path.join(DATA_DIR, 'pinas.json');
+  const F_PREMIOS  = path.join(DATA_DIR, 'premios.json');
 
   let jornadas = leer(F_JORNADAS, []);
   let redes    = leer(F_REDES, []);
@@ -198,6 +199,70 @@ module.exports = function montarMetricas(app, ctx) {
     return pinasCache.lista;
   }
   function pinaVisible(p) { return p && !p.oculta && p.aprobada !== false; }
+
+  let premiosCache = { ts: 0, lista: [] };
+  function premios() {
+    if (Date.now() - premiosCache.ts < 20000) return premiosCache.lista;
+    premiosCache = { ts: Date.now(), lista: leer(F_PREMIOS, []) };
+    return premiosCache.lista;
+  }
+
+  /* ---- las fotos del display ----
+     El archivo lo sirve pinas.js en /api/foto/<archivo> y pide la clave. Esta
+     pagina ya esta detras de la clave, asi que se la agregamos al src. Las
+     ocultas TAMBIEN se muestran, en gris: son justamente las que hay que
+     poder mirar para entender por que se ocultaron. */
+  function fotoURL(archivo) {
+    return '/api/foto/' + encodeURIComponent(archivo) +
+           (CLAVE ? '?clave=' + encodeURIComponent(CLAVE) : '');
+  }
+  // 95 -> "1h 35m". Los minutos pelados no se leen de un vistazo.
+  function fmtMin(m) {
+    m = Math.max(0, Math.round(m));
+    if (m < 60) return m + 'm';
+    return Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm';
+  }
+
+  function pinasDe(noche) {
+    return pinas().filter(function (p) { return p.noche === noche; })
+                  .sort(function (a, b) { return b.ts - a.ts; });
+  }
+  function fotosDe(noche) {
+    return pinasDe(noche).filter(function (p) { return p.foto; });
+  }
+  function ultimasFotos(n) {
+    return pinas().filter(function (p) { return p.foto; })
+                  .sort(function (a, b) { return b.ts - a.ts; })
+                  .slice(0, n || 12);
+  }
+
+  /* ---- lo que pasa en el totem, que hasta ahora no se veia en ningun lado ----
+     El totem sabe cosas que el admin no: quien cargo, quien giro, que salio en
+     la ruleta y que premios quedaron sin retirar. Sin esto, para saber si
+     alguien tiene que pasar por la caja a buscar algo habia que acordarse. */
+  function resumenTotem(dias) {
+    const desde = dias ? Date.now() - dias * DIA : inicioDeNoche(nocheHoy());
+    const lista = pinas().filter(function (p) { return p.ts >= desde && pinaVisible(p); });
+    const pre = premios().filter(function (p) { return p.ts >= desde; });
+    const gente = {};
+    lista.forEach(function (p) { gente[clavePersona(p.apodo)] = 1; });
+    const conIG = lista.filter(function (p) { return p.ig && String(p.ig).trim(); }).length;
+    const porPremio = {};
+    pre.forEach(function (p) { porPremio[p.premio] = (porPremio[p.premio] || 0) + 1; });
+    const pendientes = pre.filter(function (p) { return !p.entregado; });
+    const mejor = lista.slice().sort(function (a, b) { return (b.score || 0) - (a.score || 0) })[0];
+    return {
+      pinas: lista.length,
+      personas: Object.keys(gente).length,
+      conIG: conIG,
+      giros: lista.filter(function (p) { return p.giro; }).length,
+      premios: pre.length,
+      pendientes: pendientes,
+      porPremio: porPremio,
+      mejor: mejor || null,
+      tope: lista.filter(function (p) { return (p.score || 0) >= 999; }).length
+    };
+  }
 
   // ============================================================
   // 3. LO QUE EL SERVER NOS AVISA
@@ -476,33 +541,57 @@ module.exports = function montarMetricas(app, ctx) {
   }
 
   // ---- la mejor hora, como recomendacion y no como numero suelto ----
-  const MINIMO_POR_FRANJA = 5;   // con 2 canjes un 100% es una moneda al aire
+  /* ---- cuando conviene repartir los cupones ----
+     Antes esto miraba hora por hora y pedia 5 canjes en la MISMA hora para
+     decir algo. Con un bar abierto de 17 a 3:30 son diez casilleros: con 20
+     canjes te quedan dos por casillero y nunca llega a 5, asi que el panel
+     siempre mostraba "no alcanza". El dato no estaba mal, estaba mal cortado.
+     Tres franjas juntan datos cuatro veces mas rapido y ademas es como se
+     piensa un bar: temprano, el pico, y la madrugada. */
+  const FRANJAS = [
+    { nom: 'Temprano (17 a 21)',   dentro: function (m) { return m >= 17 * 60 && m < 21 * 60; } },
+    { nom: 'El pico (21 a 00)',    dentro: function (m) { return m >= 21 * 60; } },
+    { nom: 'Madrugada (00 en adelante)', dentro: function (m) { return m < 12 * 60; } }
+  ];
+  const MINIMO_FRANJA = 3;   // con 2 canjes un 100% es una moneda al aire
 
-  function fraseMejorHora() {
-    const canjes = dCanjes();
-    const porHora = {};
-    canjes.forEach(function (x) {
-      const h = partesArg(x.ts).minutos / 60 | 0;
-      if (!porHora[h]) porHora[h] = { canjes: 0, conv: 0 };
-      porHora[h].canjes++;
-      if (x.conv15) porHora[h].conv++;
+  function franjaDe(ts) {
+    const m = partesArg(ts).minutos;
+    for (let i = 0; i < FRANJAS.length; i++) if (FRANJAS[i].dentro(m)) return i;
+    return 0;
+  }
+
+  function porFranjas(dias) {
+    const desde = Date.now() - (dias || 30) * DIA;
+    const f = FRANJAS.map(function (x) { return { nom: x.nom, canjes: 0, conv: 0 }; });
+    dCanjes().forEach(function (x) {
+      if (x.ts < desde) return;
+      const i = franjaDe(x.ts);
+      f[i].canjes++;
+      if (x.conv15) f[i].conv++;
     });
-    let mejor = null, maxCanjes = 0;
-    Object.keys(porHora).forEach(function (h) {
-      if (porHora[h].canjes > maxCanjes) maxCanjes = porHora[h].canjes;
-      if (porHora[h].canjes < MINIMO_POR_FRANJA) return;
-      const tasa = porHora[h].conv / porHora[h].canjes;
-      if (!mejor || tasa > mejor.tasa) {
-        mejor = { hora: Number(h), tasa: tasa, canjes: porHora[h].canjes, conv: porHora[h].conv };
-      }
-    });
-    if (!mejor) {
-      return { hay: false, texto: 'Todav\u00eda no hay suficientes canjes para saber la mejor hora. ' +
-        'Hacen falta al menos ' + MINIMO_POR_FRANJA + ' en una misma franja; ahora el m\u00e1ximo es ' + maxCanjes + '.' };
+    f.forEach(function (x) { x.pc = x.canjes ? Math.round(x.conv * 100 / x.canjes) : null; });
+
+    const conDatos = f.filter(function (x) { return x.canjes >= MINIMO_FRANJA; });
+    const total = f.reduce(function (a, x) { return a + x.canjes; }, 0);
+    if (!conDatos.length) {
+      const masLlena = f.slice().sort(function (a, b) { return b.canjes - a.canjes; })[0];
+      return { filas: f, hay: false, total: total,
+        texto: total === 0
+          ? 'Todav\u00eda no se canje\u00f3 ning\u00fan cup\u00f3n. Este cuadro se llena solo a medida que los usen.'
+          : 'Con ' + total + ' ' + (total === 1 ? 'canje' : 'canjes') + ' todav\u00eda no alcanza para comparar franjas. ' +
+            'Con ' + MINIMO_FRANJA + ' en una misma franja ya te puedo decir cu\u00e1l convierte mejor; ' +
+            'la que m\u00e1s tiene es "' + masLlena.nom + '" con ' + masLlena.canjes + '.' };
     }
-    return { hay: true, hora: mejor.hora,
-      texto: 'Repart\u00ed cupones cerca de las ' + mejor.hora + ':00. Es cuando m\u00e1s terminan en venta: ' +
-        mejor.conv + ' de ' + mejor.canjes + ' canjes compraron despu\u00e9s.' };
+    const mejor = conDatos.slice().sort(function (a, b) { return b.pc - a.pc; })[0];
+    const peor  = conDatos.slice().sort(function (a, b) { return a.pc - b.pc; })[0];
+    let texto = 'La franja que mejor convierte es <b>' + esc(mejor.nom) + '</b>: de ' + mejor.canjes +
+      ' canjes, ' + mejor.conv + ' ' + (mejor.conv === 1 ? 'compr\u00f3' : 'compraron') + ' despu\u00e9s (' + mejor.pc + '%).';
+    if (conDatos.length > 1 && mejor.pc > peor.pc) {
+      texto += ' Contra ' + peor.pc + '% de "' + esc(peor.nom) + '": el mismo cup\u00f3n rinde ' +
+        (peor.pc > 0 ? (mejor.pc / peor.pc).toFixed(1) + ' veces m\u00e1s' : 'mucho m\u00e1s') + ' si se reparte en esa franja.';
+    }
+    return { filas: f, hay: true, total: total, mejor: mejor, texto: texto };
   }
 
   // ---- ingresos ----
@@ -686,9 +775,20 @@ module.exports = function montarMetricas(app, ctx) {
     '.tabla{width:100%;border-collapse:collapse;font-family:"Share Tech Mono",monospace;font-size:13px}' +
     '.tabla td{padding:8px 4px;border-bottom:1px solid var(--borde)}' +
     '.tabla td.der{text-align:right}' +
+    '.tabla td.tenue{color:var(--tenue)}' +
+    '.tenue{color:var(--tenue)}' +
     '.tabla a{color:var(--tenue);text-decoration:none;font-size:11px;border:1px solid var(--borde);' +
     'padding:3px 7px;border-radius:5px}' +
     '.tabla a.on{color:var(--led);border-color:var(--led)}' +
+    '.tira{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:9px}' +
+    '.pic{display:block;text-decoration:none;color:inherit;background:var(--sup);border:1px solid var(--borde);' +
+    'border-radius:8px;overflow:hidden}' +
+    '.pic img{display:block;width:100%;aspect-ratio:4/3;object-fit:cover;background:#1a1010}' +
+    '.pic .cap{padding:6px 7px 7px;font-family:"Share Tech Mono",monospace;font-size:11px;line-height:1.35}' +
+    '.pic .cap b{display:block;color:var(--led);font-size:15px}' +
+    '.pic .cap span{color:var(--tenue)}' +
+    '.pic.oculta{opacity:.4}' +
+    '.pic.oculta .cap b{color:var(--mal)}' +
     '.pie{padding:18px;text-align:center;color:var(--tenue);font-size:11px;font-family:"Share Tech Mono",monospace}';
 
   function cabeza(titulo, sub) {
@@ -719,7 +819,7 @@ module.exports = function montarMetricas(app, ctx) {
     const tmSem = tiempoMuerto(Date.now() - 7 * DIA, Date.now());
     const porMin = plataPorMinuto();
     const emb = embudoCupones(Date.now() - 30 * DIA, Date.now());
-    const mej = fraseMejorHora();
+    const mej = porFranjas(30);
     const ado = adopcion(30);
     const rec = recurrencia(30);
     const sem  = ingresosEntre(claveHaceDias(6), nocheHoy());
@@ -804,6 +904,96 @@ module.exports = function montarMetricas(app, ctx) {
     }
     h += '</div>';
 
+    // --- lo que paso en el totem ---
+    const tvHoy = resumenTotem(0), tvSem = resumenTotem(7);
+    h += '<div class="seccion"><h2 class="titulo">El t\u00f3tem esta noche</h2>';
+    if (tvHoy.pinas) {
+      h += '<div class="rot">Pi\u00f1as cargadas</div><div class="cifra">' + tvHoy.pinas + '</div>' +
+        '<p class="lectura">De ' + tvHoy.personas + ' ' + (tvHoy.personas === 1 ? 'persona' : 'personas') +
+        (tvHoy.conIG ? ', ' + tvHoy.conIG + ' con Instagram' : '') + '.</p>';
+      if (tvHoy.mejor) {
+        h += '<div class="reparto"><span>Mejor de la noche</span><b>' +
+          esc(tvHoy.mejor.apodo) + ' &middot; ' + (tvHoy.mejor.score || 0) + '</b></div>';
+      }
+      h += '<div class="reparto"><span>Giraron la ruleta</span><b>' + tvHoy.giros + '</b></div>';
+      if (tvHoy.tope >= 2) {
+        h += '<div class="alerta" style="margin-top:12px"><b>!</b><div>' + tvHoy.tope +
+          ' pi\u00f1as llegaron a 999, que es el tope de la m\u00e1quina. El r\u00e9cord hist\u00f3rico ya no se puede romper: ' +
+          'como gancho est\u00e1 gastado y conviene cambiarlo por otro desaf\u00edo.</div></div>';
+      }
+    } else {
+      h += '<p class="lectura tenue">Todav\u00eda no se carg\u00f3 ninguna pi\u00f1a esta noche.</p>';
+    }
+    h += '<div class="reparto" style="margin-top:14px"><span>Pi\u00f1as en 7 d\u00edas</span><b>' + tvSem.pinas +
+      ' &middot; ' + tvSem.personas + ' personas</b></div>';
+    h += '</div>';
+
+    /* --- las fotos del display ---
+       Hasta ahora la unica forma de verlas era abrir /fotos a mano, asi que
+       en la practica nadie las miraba: se cargaban puntajes y nadie
+       controlaba nada. Aca estan al lado del resto de los numeros. La foto es
+       la unica prueba de que el puntaje es real, y ademas es material para
+       Instagram. Se muestran las de esta noche; si la noche recien empieza,
+       las ultimas que haya. */
+    h += '<div class="seccion"><h2 class="titulo">El t\u00f3tem, en vivo</h2>' +
+      '<p class="lectura">Lo mismo que est\u00e1 saliendo en la tele ahora, en la pantalla del ' +
+      'celular y en 9:16: lo que grabes ya sale con la medida de una historia.</p>' +
+      '<div class="botones"><a class="b ancho on" href="/vivo' + c + '">VER EN VIVO</a></div></div>';
+
+    const fotoHoy = fotosDe(nocheHoy());
+    const fotoLista = fotoHoy.length ? fotoHoy : ultimasFotos(12);
+    h += '<div class="seccion"><h2 class="titulo">Fotos del display</h2>';
+    if (fotoLista.length) {
+      h += '<div class="tira">';
+      fotoLista.slice(0, 24).forEach(function (p) {
+        const hora = new Date(p.ts).toLocaleString('es-AR', { timeZone: TZ, hour12: false,
+          hour: '2-digit', minute: '2-digit' });
+        h += '<a class="pic' + (p.oculta ? ' oculta' : '') + '" target="_blank" rel="noopener" href="' +
+          fotoURL(p.foto) + '">' +
+          '<img loading="lazy" src="' + fotoURL(p.foto) + '" alt="">' +
+          '<div class="cap"><b>' + (p.score || 0) + '</b>' +
+          '<span>' + esc(String(p.apodo || '').slice(0, 12)) + '<br>' + hora +
+          (p.oculta ? ' &middot; oculta' : '') + '</span></div></a>';
+      });
+      h += '</div>';
+      h += '<p class="lectura tenue">' +
+        (fotoHoy.length ? 'Las de esta noche. ' : 'Esta noche todav\u00eda no hay: estas son las \u00faltimas. ') +
+        'Toc\u00e1 una para verla grande. Si un puntaje no coincide con su foto, se saca del ranking desde ' +
+        '<a href="/fotos?clave=' + encodeURIComponent(CLAVE) + '" style="color:var(--led)">la pantalla de pi\u00f1as</a>.</p>';
+      const sinFoto = (fotoHoy.length ? pinasDe(nocheHoy()) : []).filter(function (p) { return !p.foto; }).length;
+      if (sinFoto) {
+        h += '<div class="alerta medio" style="margin-top:12px"><b>!</b><div>' + sinFoto +
+          (sinFoto === 1 ? ' pi\u00f1a entr\u00f3 sin foto' : ' pi\u00f1as entraron sin foto') +
+          '. Sin foto no hay con qu\u00e9 comprobar el puntaje.</div></div>';
+      }
+    } else {
+      h += '<p class="lectura tenue">Todav\u00eda no carg\u00f3 nadie una foto del display.</p>';
+    }
+    h += '</div>';
+
+    // --- premios de la ruleta, con lo que falta entregar ---
+    h += '<div class="seccion"><h2 class="titulo">Premios de la ruleta</h2>';
+    if (tvSem.premios) {
+      Object.keys(tvSem.porPremio).forEach(function (k) {
+        h += '<div class="reparto"><span>' + esc(k) + '</span><b>' + tvSem.porPremio[k] + '</b></div>';
+      });
+      h += '<p class="lectura tenue">\u00daltimos 7 d\u00edas.</p>';
+    } else {
+      h += '<p class="lectura tenue">No sali\u00f3 ning\u00fan premio en los \u00faltimos 7 d\u00edas.</p>';
+    }
+    if (tvSem.pendientes.length) {
+      h += '<div class="alerta" style="margin-top:12px"><b>!</b><div>Hay <b>' + tvSem.pendientes.length +
+        '</b> ' + (tvSem.pendientes.length === 1 ? 'premio sin retirar' : 'premios sin retirar') +
+        '. La caja los cobra con el c\u00f3digo de 4 d\u00edgitos:</div></div>';
+      tvSem.pendientes.slice(0, 8).forEach(function (p) {
+        const d = new Date(p.ts).toLocaleString('es-AR', { timeZone: TZ, hour12: false,
+          day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        h += '<div class="reparto"><span>' + esc(p.apodo) + ' &middot; ' + d + '</span><b>' +
+          esc(p.premio) + ' &middot; c\u00f3digo ' + esc(p.codigo) + '</b></div>';
+      });
+    }
+    h += '</div>';
+
     // --- cupones ---
     h += '<div class="seccion"><h2 class="titulo">Cupones &middot; \u00faltimos 30 d\u00edas</h2>';
     if (emb.repartidos) {
@@ -821,7 +1011,17 @@ module.exports = function montarMetricas(app, ctx) {
         '</div>';
       if (emb.diagnostico) h += '<p class="lectura">' + esc(emb.diagnostico) + '</p>';
       if (emb.recaudado) h += '<div class="reparto" style="margin-top:10px"><span>Plata que trajeron</span><b>' + pesos(emb.recaudado) + '</b></div>';
-      h += '<p class="lectura' + (mej.hay ? '' : ' tenue') + '" style="margin-top:12px">' + esc(mej.texto) + '</p>';
+      /* Las tres franjas, con su conversion al lado: se entiende de un
+         vistazo cual rinde y cual no, incluso con pocos datos. */
+      h += '<div class="rot" style="margin-top:16px">Cu\u00e1ndo conviene repartirlos</div>';
+      mej.filas.forEach(function (f) {
+        const flojo = f.canjes < MINIMO_FRANJA;
+        h += '<div class="reparto"' + (flojo ? ' style="opacity:.55"' : '') + '><span>' + esc(f.nom) + '</span><b>' +
+          (f.canjes ? f.canjes + (f.canjes === 1 ? ' canje &middot; ' : ' canjes &middot; ') +
+                      f.conv + (f.conv === 1 ? ' compr\u00f3' : ' compraron') + ' (' + f.pc + '%)'
+                    : 'sin canjes') + '</b></div>';
+      });
+      h += '<p class="lectura' + (mej.hay ? '' : ' tenue') + '">' + mej.texto + '</p>';
     } else {
       h += '<p class="lectura tenue">Todav\u00eda no hay cupones cargados.</p>';
     }
@@ -888,19 +1088,81 @@ module.exports = function montarMetricas(app, ctx) {
       if (j) { j.tipo = tipo || null; guardar(F_JORNADAS, jornadas); }
     }
 
-    const lista = jornadas.slice(-40).reverse();
-    let h = cabeza('BPK noches', 'marcar noches &middot; normal o evento');
-    h += '<div class="seccion"><p class="lectura">Marc\u00e1 cada noche. El promedio de las normales es el <b>piso</b> del negocio y el de las de evento es el <b>techo</b>: es el par de n\u00fameros que se muestra afuera. Una m\u00e1quina no puede adivinar cu\u00e1l fue cu\u00e1l, vos lo sab\u00e9s en un segundo.</p></div>';
-    h += '<div class="seccion"><table class="tabla">';
+    /* Historial COMPLETO, no las ultimas 40. Lo que se ve una noche suelta no
+       dice nada; lo que dice algo es la serie: si sube, si baja, que dias
+       rinden y cuanto se pierde por estar caido. Se puede filtrar por tipo. */
+    const filtro = String(req.query.ver || '');
+    let lista = jornadas.slice().reverse();
+    if (filtro === 'normal' || filtro === 'evento') {
+      lista = lista.filter(function (j) { return j.tipo === filtro; });
+    } else if (filtro === 'sinmarcar') {
+      lista = lista.filter(function (j) { return !j.tipo; });
+    }
+
+    const suma = function (campo) {
+      return lista.reduce(function (a, j) { return a + (j[campo] || 0); }, 0);
+    };
+    const nNoches = lista.length;
+    const totPlata = suma('total'), totPinas = suma('pinas'), totMuerto = suma('muertoAbierto');
+    const totAbierta = suma('minAbierta');
+    const prom = nNoches ? Math.round(totPlata / nNoches) : 0;
+    const mejor = lista.slice().sort(function (a, b) { return b.total - a.total; })[0];
+
+    let h = cabeza('BPK noches', 'historial completo');
+
+    h += '<div class="seccion"><h2 class="titulo">' +
+      (nNoches ? nNoches + (nNoches === 1 ? ' noche' : ' noches') : 'sin noches') +
+      (filtro ? ' &middot; ' + esc(filtro) : ' &middot; todo el historial') + '</h2>';
+    if (nNoches) {
+      h += '<div class="rot">Promedio por noche</div><div class="cifra">' + pesos(prom) + '</div>';
+      h += '<div class="reparto"><span>Total acumulado</span><b>' + pesos(totPlata) + '</b></div>';
+      h += '<div class="reparto"><span>Mejor noche</span><b>' + pesos(mejor.total) + ' &middot; ' +
+        new Date(mejor.desde).toLocaleDateString('es-AR', { timeZone: TZ, day: '2-digit', month: '2-digit', year: '2-digit' }) + '</b></div>';
+      h += '<div class="reparto"><span>Pi\u00f1as cargadas</span><b>' + totPinas + '</b></div>';
+      if (totAbierta) {
+        const pc = Math.round(totMuerto * 1000 / totAbierta) / 10;
+        h += '<div class="reparto"><span>Sin poder cobrar, con el bar abierto</span><b>' +
+          Math.round(totMuerto / 60) + ' h &middot; ' + pc + '%</b></div>';
+        h += '<p class="lectura tenue">Ese porcentaje es el que importa: cu\u00e1nto del tiempo ' +
+          'que el bar estuvo abierto la m\u00e1quina no pudo cobrar. Todo lo que pas\u00f3 con el bar ' +
+          'cerrado no se cuenta.</p>';
+      }
+    } else {
+      h += '<p class="lectura tenue">Todav\u00eda no hay noches cerradas con ese filtro.</p>';
+    }
+    h += '<div class="botones">' +
+      ['', 'normal', 'evento', 'sinmarcar'].map(function (f) {
+        const et = f === '' ? 'Todas' : (f === 'sinmarcar' ? 'Sin marcar' : f.charAt(0).toUpperCase() + f.slice(1) + 'es');
+        return '<a class="b' + (filtro === f ? ' on' : '') + '" href="/noches' +
+          (f ? '?ver=' + f + cAmp : c) + '">' + et + '</a>';
+      }).join('') + '</div></div>';
+
+    h += '<div class="seccion"><h2 class="titulo">Noche por noche</h2>' +
+      '<p class="lectura tenue">Marc\u00e1 cada una: el promedio de las normales es el <b>piso</b> ' +
+      'del negocio y el de las de evento es el <b>techo</b>. Una m\u00e1quina no puede adivinar ' +
+      'cu\u00e1l fue cu\u00e1l, vos lo sab\u00e9s en un segundo.</p>';
+    h += '<table class="tabla" style="margin-top:12px">';
+    h += '<tr><td class="tenue" style="font-size:11px;letter-spacing:.1em">FECHA</td>' +
+      '<td class="der tenue" style="font-size:11px;letter-spacing:.1em">CAJA</td>' +
+      '<td class="der tenue" style="font-size:11px;letter-spacing:.1em">PI\u00d1AS</td>' +
+      '<td class="der tenue" style="font-size:11px;letter-spacing:.1em">CA\u00cdDA</td>' +
+      '<td class="der"></td></tr>';
     lista.forEach(function (j) {
       const d = new Date(j.desde);
+      const caido = j.muertoAbierto || 0;
+      const color = caido >= 60 ? 'var(--mal)' : (caido >= 15 ? 'var(--medio)' : 'var(--tenue)');
       h += '<tr><td>' + d.toLocaleDateString('es-AR', { timeZone: TZ, weekday: 'short', day: '2-digit', month: '2-digit' }) + '</td>' +
         '<td class="der">' + pesos(j.total) + '</td>' +
-        '<td class="der"><a class="' + (j.tipo === 'normal' ? 'on' : '') + '" href="/noches?marcar=' + j.noche + '&tipo=normal' + cAmp + '">normal</a> ' +
-        '<a class="' + (j.tipo === 'evento' ? 'on' : '') + '" href="/noches?marcar=' + j.noche + '&tipo=evento' + cAmp + '">evento</a></td></tr>';
+        '<td class="der">' + (j.pinas || 0) + (j.personas ? '<span style="color:var(--tenue)">/' + j.personas + '</span>' : '') + '</td>' +
+        '<td class="der" style="color:' + color + '">' + (caido ? fmtMin(caido) : '&mdash;') + '</td>' +
+        '<td class="der"><a class="' + (j.tipo === 'normal' ? 'on' : '') + '" href="/noches?marcar=' + j.noche + '&tipo=normal' + cAmp + (filtro ? '&ver=' + filtro : '') + '">normal</a> ' +
+        '<a class="' + (j.tipo === 'evento' ? 'on' : '') + '" href="/noches?marcar=' + j.noche + '&tipo=evento' + cAmp + (filtro ? '&ver=' + filtro : '') + '">evento</a></td></tr>';
     });
     if (!lista.length) h += '<tr><td>Todav\u00eda no hay noches cerradas.</td></tr>';
-    h += '</table><div class="botones"><a class="b ancho" href="/metricas' + c + '">Volver</a></div></div></body></html>';
+    h += '</table>';
+    h += '<p class="lectura tenue" style="margin-top:12px">En PI\u00d1AS, el n\u00famero chico es cu\u00e1nta ' +
+      'gente distinta carg\u00f3. En CA\u00cdDA, s\u00f3lo los minutos con el bar abierto.</p>';
+    h += '<div class="botones"><a class="b ancho" href="/metricas' + c + '">Volver</a></div></div></body></html>';
     res.type('text/html').send(h);
   });
 
