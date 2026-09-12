@@ -686,6 +686,107 @@ module.exports = function montarMetricas(app, ctx) {
     return porRed;
   }
 
+  /* ---- LA NOCHE, HORA POR HORA ----
+     Los numeros sueltos ("se cayo 40 minutos", "entraron $18.000") no dicen
+     nada solos. Puestos en la misma fila por hora si: se ve que el corte fue
+     justo a las 2, que a esa hora el bar estaba lleno, y cuanta plata no se
+     cobro mientras estaba muerta. Es la unica forma de discutir si conviene
+     cambiar de wifi o si el problema es que alguien la apaga. */
+  function horaPorHora(clave) {
+    const arranque = inicioDeNoche(clave);          // mediodia de ese dia
+    const caidas = dCaidas();
+    const ventas = dVentas();
+    const pin = pinas().filter(function (p) { return pinaVisible(p) && p.noche === clave; });
+    const ppm = plataPorMinuto();
+    const filas = [];
+    for (let i = 5; i <= 17; i++) {                 // de las 17 a las 05
+      const desde = arranque + i * 3600e3;
+      const hasta = desde + 3600e3;
+      if (desde > Date.now()) break;
+      const abiertos = minutosAbiertosDe(desde, Math.min(hasta, Date.now()));
+      if (!abiertos) continue;                      // el bar estaba cerrado
+      let muerto = 0, motivo = null;
+      caidas.forEach(function (c) {
+        const a = Math.max(c.inicio, desde), b = Math.min(c.fin || Date.now(), hasta);
+        if (b <= a || c.incompleta) return;
+        const m = minutosAbiertosDe(a, b);
+        if (!m) return;
+        muerto += m;
+        if (!motivo || m > 0) motivo = c.motivo || 'wifi';
+      });
+      muerto = Math.min(muerto, abiertos);
+      filas.push({
+        hora: (i + 12) % 24,
+        abiertos: abiertos,
+        muerto: muerto,
+        motivo: motivo,
+        red: redEnEseMomento(desde + 1800e3),
+        pinas: pin.filter(function (p) { return p.ts >= desde && p.ts < hasta; }).length,
+        plata: ventas.filter(function (v) { return v.ts >= desde && v.ts < hasta; })
+                     .reduce(function (a, v) { return a + (v.monto || 0); }, 0),
+        perdido: Math.round(muerto * ppm)
+      });
+    }
+    return filas;
+  }
+
+  /* ---- que red rinde mas, no solo cual se corta mas ----
+     La seccion de wifi que ya estaba solo contaba cortes. Un corte de 2
+     minutos a las 18 y uno de 40 a las 2 pesan igualito ahi, y no son lo
+     mismo. Esto cruza cada red con las horas que estuvo puesta, la plata que
+     entro mientras tanto y la senal promedio. */
+  function rendimientoPorRed(dias) {
+    const desde = Date.now() - (dias || 30) * DIA;
+    const porRed = {};
+    const tocar = function (ssid) {
+      const k = ssid || 'sin dato';
+      if (!porRed[k]) porRed[k] = { minutos: 0, muerto: 0, cortes: 0, plata: 0,
+                                    pinas: 0, senal: [], red: k };
+      return porRed[k];
+    };
+    // cuanto tiempo estuvo puesta cada red, dentro del horario del bar
+    redes.forEach(function (r) {
+      const a = Math.max(r.desde, desde), b = Math.min(r.hasta || Date.now(), Date.now());
+      if (b <= a) return;
+      const e = tocar(r.ssid);
+      e.minutos += minutosAbiertosDe(a, b);
+      if (typeof r.rssi === 'number') e.senal.push(r.rssi);
+    });
+    dCaidas().forEach(function (c) {
+      if (c.incompleta || (c.fin || Date.now()) < desde) return;
+      const m = minutosAbiertoYCerrado(c);
+      if (!m.abiertos) return;
+      const e = tocar(redEnEseMomento(c.inicio));
+      e.muerto += m.abiertos;
+      if (c.motivo !== 'apagada') e.cortes++;
+    });
+    dVentas().forEach(function (v) {
+      if (v.ts < desde) return;
+      const e = tocar(redEnEseMomento(v.ts));
+      e.plata += (v.monto || 0);
+    });
+    pinas().forEach(function (p) {
+      if (p.ts < desde || !pinaVisible(p)) return;
+      tocar(redEnEseMomento(p.ts)).pinas++;
+    });
+    return Object.keys(porRed).map(function (k) {
+      const e = porRed[k];
+      e.senalProm = e.senal.length
+        ? Math.round(e.senal.reduce(function (a, x) { return a + x; }, 0) / e.senal.length) : null;
+      e.caidaPc = e.minutos > 0 ? (100 * e.muerto / e.minutos) : 0;
+      return e;
+    }).sort(function (a, b) { return b.minutos - a.minutos; });
+  }
+
+  // Una senal en dBm no le dice nada a nadie. En palabras, si.
+  function calidadSenal(dbm) {
+    if (dbm === null || dbm === undefined) return { txt: 'sin dato', color: 'tenue' };
+    if (dbm >= -60) return { txt: 'buena', color: 'ok' };
+    if (dbm >= -67) return { txt: 'justa', color: 'ok' };
+    if (dbm >= -75) return { txt: 'pobre', color: 'aviso' };
+    return { txt: 'muy pobre', color: 'mal' };
+  }
+
   // ---- las alertas: solo lo que pide una accion ----
   function alertas() {
     const a = [];
@@ -789,6 +890,23 @@ module.exports = function montarMetricas(app, ctx) {
     '.pic .cap span{color:var(--tenue)}' +
     '.pic.oculta{opacity:.4}' +
     '.pic.oculta .cap b{color:var(--mal)}' +
+    /* la noche hora por hora: una fila por hora, con la barra de plata al
+       lado del estado de la maquina. Cruzar los dos es el unico modo de ver
+       si el corte pasa cuando el bar esta lleno o cuando no hay nadie. */
+    '.hh{font-family:"Share Tech Mono",monospace;font-size:12.5px}' +
+    '.hh .f{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--borde)}' +
+    '.hh .f:last-child{border-bottom:0}' +
+    '.hh .h{width:42px;flex:none;color:var(--tenue)}' +
+    '.hh .luz{width:9px;height:26px;flex:none;border-radius:2px;background:var(--ok)}' +
+    '.hh .luz.mitad{background:linear-gradient(180deg,var(--ok) 50%,var(--mal) 50%)}' +
+    '.hh .luz.mala{background:var(--mal)}' +
+    '.hh .bar{flex:1;height:22px;background:#2E1A1A;border-radius:2px;overflow:hidden;position:relative}' +
+    '.hh .bar i{display:block;height:100%;background:var(--cuero)}' +
+    '.hh .bar u{position:absolute;inset:0;display:flex;align-items:center;padding:0 6px;' +
+    'font-style:normal;font-size:11px;color:var(--hueso);opacity:.92}' +
+    '.hh .pl{width:74px;flex:none;text-align:right}' +
+    '.hh .nota{color:var(--mal);font-size:11px;padding:0 0 7px 50px;border-bottom:1px solid var(--borde)}' +
+    '.hh .ssid{color:var(--tenue);font-size:10.5px;letter-spacing:.06em}' +
     '.pie{padding:18px;text-align:center;color:var(--tenue);font-size:11px;font-family:"Share Tech Mono",monospace}';
 
   function cabeza(titulo, sub) {
@@ -901,6 +1019,122 @@ module.exports = function montarMetricas(app, ctx) {
       }
     } else {
       h += '<p class="lectura tenue">Todav\u00eda no lleg\u00f3 ning\u00fan dato de red. Aparece la primera vez que el Shelly informe en qu\u00e9 wifi est\u00e1.</p>';
+    }
+    h += '</div>';
+
+    /* --- prendida o apagada ---
+       Sale de la MISMA cuenta que usa el panel de /admin (tiempoMuerto), a
+       proposito: dos pantallas que calculan lo mismo por caminos distintos
+       tarde o temprano dicen numeros distintos, y ahi ya no se le cree a
+       ninguna. Lo que agrega aca es el corte largo: 30 dias en vez de 7, y
+       la division entre "la apagaron" y "se cayo el wifi", que son dos
+       problemas con dos soluciones distintas. */
+    const mes = tiempoMuerto(Date.now() - 30 * DIA, Date.now());
+    h += '<div class="seccion"><h2 class="titulo">Prendida y apagada &middot; 30 d\u00edas</h2>' +
+      '<div class="cuadrantes">' +
+      '<div class="cua' + (mes.apagadaAbierto > 60 ? ' duele' : ' tranqui') + '">' +
+      '<div class="et">Apagada con el bar abierto</div><div class="va">' +
+        duracion(mes.apagadaAbierto) + '</div></div>' +
+      '<div class="cua' + (mes.wifiAbierto > 60 ? ' duele' : ' tranqui') + '">' +
+      '<div class="et">Sin wifi con el bar abierto</div><div class="va">' +
+        duracion(mes.wifiAbierto) + '</div></div>' +
+      '<div class="cua' + (mes.aperturasFallidas.length ? ' duele' : ' tranqui') + '">' +
+      '<div class="et">Abri\u00f3 el bar y no estaba</div><div class="va">' +
+        mes.aperturasFallidas.length + (mes.aperturasFallidas.length === 1 ? ' noche' : ' noches') +
+        '</div></div>' +
+      '<div class="cua' + (mes.apagadasAnticipadas.length ? ' duele' : ' tranqui') + '">' +
+      '<div class="et">Se apag\u00f3 en plena noche</div><div class="va">' +
+        mes.apagadasAnticipadas.length + (mes.apagadasAnticipadas.length === 1 ? ' vez' : ' veces') +
+        '</div></div>' +
+      '</div>';
+    if (mes.confiabilidad !== null) {
+      h += '<div class="reparto" style="margin-top:12px"><span>Estuvo cobrando</span><b>' +
+        mes.confiabilidad.toFixed(1).replace('.', ',') + '% del tiempo que el bar estuvo abierto</b></div>';
+    }
+    h += '<p class="lectura">' +
+      (mes.apagadaAbierto > mes.wifiAbierto
+        ? 'Se pierde m\u00e1s tiempo por m\u00e1quina apagada que por wifi: el arreglo es de rutina del bar, no de red.'
+        : (mes.wifiAbierto > 0
+          ? 'Se pierde m\u00e1s tiempo por wifi que por apagados: el arreglo es de red. Abajo est\u00e1 cu\u00e1l aguanta mejor.'
+          : 'No se perdi\u00f3 tiempo con el bar abierto en estos 30 d\u00edas.')) +
+      ' Es la misma cuenta del panel, pero en 30 d\u00edas en vez de 7.</p></div>';
+
+    /* --- que red rinde mas ---
+       Contar cortes no alcanza para decidir: una red puede cortarse poco y
+       estar puesta una hora, y otra cortarse mas pero haber aguantado veinte
+       noches. Lo que se compara es el porcentaje de tiempo muerto sobre el
+       tiempo que cada red estuvo realmente puesta, con el bar abierto. */
+    const rend = rendimientoPorRed(30);
+    if (rend.length && rend.some(function (r) { return r.minutos > 30; })) {
+      h += '<div class="seccion"><h2 class="titulo">Qu\u00e9 red aguanta mejor &middot; 30 d\u00edas</h2>';
+      rend.forEach(function (r) {
+        if (r.minutos < 30) return;
+        const cal = calidadSenal(r.senalProm);
+        const pc = r.caidaPc.toFixed(1).replace('.', ',');
+        h += '<div class="reparto"><span>' + esc(r.red) + '</span><b>' +
+          (r.caidaPc >= 5 ? '<span style="color:var(--mal)">' : '<span style="color:var(--ok)">') +
+          pc + '% ca\u00edda</span></b></div>' +
+          '<p class="lectura tenue" style="margin:2px 0 12px">' +
+          duracion(r.minutos) + ' puesta con el bar abierto &middot; ' +
+          r.cortes + (r.cortes === 1 ? ' corte' : ' cortes') + ' &middot; ' +
+          duracion(r.muerto) + ' muertos &middot; ' +
+          (r.senalProm !== null ? ('se\u00f1al ' + r.senalProm + ' dBm (' + cal.txt + ')') : 'sin se\u00f1al medida') +
+          ' &middot; ' + pesos(r.plata) + ' cobrados.</p>';
+      });
+      const mejor = rend.filter(function (r) { return r.minutos >= 240; })
+                        .sort(function (a, b) { return a.caidaPc - b.caidaPc; })[0];
+      const peor = rend.filter(function (r) { return r.minutos >= 240; })
+                       .sort(function (a, b) { return b.caidaPc - a.caidaPc; })[0];
+      if (mejor && peor && mejor.red !== peor.red && (peor.caidaPc - mejor.caidaPc) >= 2) {
+        h += '<div class="alerta medio"><b>&rsaquo;</b><div>Con los datos de estos 30 d\u00edas, <b>' +
+          esc(mejor.red) + '</b> se cae menos que <b>' + esc(peor.red) + '</b> (' +
+          mejor.caidaPc.toFixed(1).replace('.', ',') + '% contra ' +
+          peor.caidaPc.toFixed(1).replace('.', ',') + '%). Si hay que elegir una, es esa.</div></div>';
+      } else {
+        h += '<p class="lectura">Todav\u00eda no hay diferencia clara entre las redes. Hacen falta m\u00e1s noches en cada una para decidir con datos y no de memoria.</p>';
+      }
+      h += '</div>';
+    }
+
+    /* --- la noche hora por hora ---
+       Es la seccion que contesta "se corto y cuanto me costo". Cada fila
+       cruza cuatro cosas del mismo rato: si estaba viva, en que wifi, cuanta
+       gente cargo pina y cuanta plata entro. */
+    const mapa = horaPorHora(nocheHoy());
+    h += '<div class="seccion"><h2 class="titulo">Hora por hora, esta noche</h2>';
+    if (!mapa.length) {
+      h += '<p class="lectura tenue">La noche todav\u00eda no arranc\u00f3. Esto se llena solo a partir de las ' +
+        HORA_ABRE + ':00.</p>';
+    } else {
+      const tope = Math.max.apply(null, mapa.map(function (f) { return f.plata; }).concat([1]));
+      h += '<div class="hh">';
+      mapa.forEach(function (f) {
+        const malo = f.muerto >= f.abiertos * 0.9;
+        const algo = f.muerto > 2;
+        h += '<div class="f">' +
+          '<span class="h">' + String(f.hora).padStart(2, '0') + ':00</span>' +
+          '<span class="luz' + (malo ? ' mala' : (algo ? ' mitad' : '')) + '"></span>' +
+          '<span class="bar"><i style="width:' + Math.round(f.plata * 100 / tope) + '%"></i>' +
+          '<u>' + (f.pinas ? f.pinas + (f.pinas === 1 ? ' pi\u00f1a' : ' pi\u00f1as') : '') +
+          (f.red ? ' <span class="ssid">' + esc(f.red) + '</span>' : '') + '</u></span>' +
+          '<span class="pl">' + (f.plata ? pesos(f.plata) : '\u2014') + '</span>' +
+          '</div>';
+        if (algo) {
+          h += '<div class="nota">' + duracion(f.muerto) + ' sin poder cobrar' +
+            (f.motivo === 'apagada' ? ' (apagada)' : ' (wifi)') +
+            (f.perdido > 0 ? ' &middot; ~' + pesos(f.perdido) + ' que no entraron' : '') + '</div>';
+        }
+      });
+      h += '</div>';
+      const muertoTotal = mapa.reduce(function (a, f) { return a + f.muerto; }, 0);
+      const plataTotal  = mapa.reduce(function (a, f) { return a + f.plata; }, 0);
+      const pico = mapa.slice().sort(function (a, b) { return b.plata - a.plata; })[0];
+      h += '<p class="lectura">' +
+        (muertoTotal ? 'Esta noche estuvo ' + duracion(muertoTotal) + ' sin poder cobrar. '
+                     : 'Esta noche no perdi\u00f3 un minuto. ') +
+        (plataTotal ? 'Entraron ' + pesos(plataTotal) + ', y la hora m\u00e1s fuerte fue las ' +
+          String(pico.hora).padStart(2, '0') + ':00 con ' + pesos(pico.plata) + '. ' : '') +
+        'La barra es la plata de esa hora; la tirita de la izquierda, si la m\u00e1quina estaba viva.</p>';
     }
     h += '</div>';
 
