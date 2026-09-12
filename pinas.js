@@ -935,6 +935,12 @@ module.exports = function montarPinas(app, ctx) {
 '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">',
 '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">',
 '<meta name="color-scheme" content="dark"><title>BeerPunch &middot; En vivo</title>',
+/* Con esto, si se agrega a la pantalla de inicio, iOS lo abre SIN la barra
+   del navegador: es la unica forma de tener pantalla completa de verdad en
+   un iPhone, porque Safari no deja pedirla por codigo salvo para videos. */
+'<meta name="apple-mobile-web-app-capable" content="yes">',
+'<meta name="mobile-web-app-capable" content="yes">',
+'<meta name="apple-mobile-web-app-status-bar-style" content="black">',
 '<style>',
 '*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}',
 'html,body{height:100%;background:#000;overflow:hidden;',
@@ -955,15 +961,74 @@ module.exports = function montarPinas(app, ctx) {
 '  color:#98A1B0;display:flex;justify-content:space-between;align-items:center;gap:12px;',
 '  background:linear-gradient(180deg,rgba(0,0,0,.85),transparent);transition:opacity .25s}',
 '#ayuda a{color:#FFD518;text-decoration:none;font-weight:700}',
+'#cartel{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;',
+'  padding:24px;background:rgba(4,5,10,.93)}',
+'#cartel.ver{display:flex}',
+'#cartel .caja2{max-width:360px;background:#14161d;border:1px solid #2b303b;border-radius:16px;',
+'  padding:22px;font-size:14.5px;line-height:1.55;color:#D9DEE7}',
+'#cartel b{color:#fff}',
+'#cartel p{margin:12px 0 0}',
+'#cartel .ok2{display:block;margin-top:18px;text-align:center;background:#FFD518;color:#000;',
+'  border-radius:11px;padding:13px;font-weight:800;letter-spacing:.5px}',
 '#caja{overflow:hidden}',
 'body.limpio #ayuda{opacity:0}',
+/* La hoja del ranking: sube desde abajo, tapa la mitad de la pantalla y deja
+   ver el totem arriba, para que se vea el cambio en el momento en que se
+   toca el boton. */
+'#hoja{position:fixed;left:0;right:0;bottom:0;z-index:12;max-height:62%;overflow:auto;',
+'  transform:translateY(110%);transition:transform .25s ease;background:#0d0f15;',
+'  border-top:1px solid #2b303b;border-radius:18px 18px 0 0;',
+'  padding:16px 14px calc(16px + env(safe-area-inset-bottom))}',
+'#hoja.ver{transform:translateY(0)}',
+'#hoja h3{font-size:12.5px;letter-spacing:1.4px;color:#98A1B0;margin:2px 0 10px;text-transform:uppercase}',
+'#hoja .linea{display:flex;gap:8px;margin-bottom:9px}',
+'#hoja .linea .b{padding:11px 6px;font-size:13px}',
+'.nom{display:flex;align-items:center;gap:10px;padding:9px 12px;margin-bottom:7px;',
+'  background:#141720;border:1px solid #232833;border-radius:11px}',
+'.nom .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px}',
+'.nom .s{color:#FFD518;font-weight:800;font-size:14px}',
+'.nom .x{flex:none;width:38px;height:34px;border:1px solid #47212a;background:#24141a;color:#ff6b7d;',
+'  border-radius:9px;font-size:17px;font-weight:800;line-height:1}',
+'.vacia{color:#6a7383;font-size:13.5px;padding:8px 2px 12px}',
+'#sexo{display:flex;gap:8px;margin-bottom:11px}',
+'#sexo .b{padding:10px}',
 '</style></head><body>',
 '<div id="ayuda"><a id="bVolver" href="#">&larr; volver</a>',
 '<span>en vivo, lo mismo que la tele</span></div>',
 '<div id="caja"><iframe id="tv" src="/totem?espejo=1" title="T&oacute;tem"></iframe></div>',
+'<div id="cartel"><div class="caja2">',
+'<b>Para grabar sin la barra del navegador</b>',
+'<p>En iPhone no se puede pedir pantalla completa desde la p&aacute;gina: lo bloquea Safari. ',
+'El camino que s&iacute; funciona, y se hace una sola vez:</p>',
+'<p><b>1.</b> Toc\u00e1 <b>Compartir</b> (el cuadrito con la flecha, abajo).<br>',
+'<b>2.</b> <b>Agregar a inicio</b>.<br>',
+'<b>3.</b> Cerr\u00e1 Safari y abrilo desde el &iacute;cono nuevo.</p>',
+'<p>Desde ah&iacute; entra sin barra ni nada, a pantalla completa. Despu&eacute;s ',
+'<b>OCULTAR</b> y grab&aacute;s la pantalla limpia.</p>',
+'<span class="ok2">ENTENDIDO</span>',
+'</div></div>',
+'<div id="hoja">',
+'<h3>Ranking de esta noche</h3>',
+'<div id="sexo">',
+'<button class="b on" id="sM">Hombres</button>',
+'<button class="b" id="sF">Mujeres</button>',
+'</div>',
+'<div id="lista"></div>',
+'<div class="linea">',
+'<button class="b" id="mas1">+1 nombre</button>',
+'<button class="b" id="mas3">+3</button>',
+'<button class="b" id="mas10">Llenar 10</button>',
+'</div>',
+'<div class="linea">',
+'<button class="b" id="borrarP">Borrar los de prueba</button>',
+'<button class="b" id="desco">Descoronar</button>',
+'</div>',
+'<div class="linea"><button class="b" id="cerrarHoja">Listo</button></div>',
+'</div>',
 '<div id="barra">',
 '<button class="b" id="bLimpio">OCULTAR</button>',
-'<button class="b" id="bLlenar">LLENAR</button>',
+'<button class="b" id="bRank">RANKING</button>',
+'<button class="b" id="bLlenar">ENCUADRE</button>',
 '<button class="b" id="bFull">PANTALLA COMPLETA</button>',
 '</div>',
 '<script>',
@@ -1006,19 +1071,85 @@ module.exports = function montarPinas(app, ctx) {
 '};',
 'document.getElementById("bLlenar").onclick=function(){',
 '  llenar=!llenar; this.classList.toggle("on",llenar);',
-'  this.textContent=llenar?"9:16":"LLENAR"; acomodar();',
+'  this.textContent=llenar?"9:16":"ENCUADRE"; acomodar();',
 '};',
-'document.getElementById("bFull").onclick=function(){',
-'  var d=document.documentElement;',
-'  try{',
-'    if(document.fullscreenElement||document.webkitFullscreenElement){',
-'      (document.exitFullscreen||document.webkitExitFullscreen).call(document);',
-'    }else{',
-'      (d.requestFullscreen||d.webkitRequestFullscreen).call(d);',
-'    }',
-'  }catch(e){}',
-'  setTimeout(acomodar,400);',
+/* ===== el ranking, desde el mismo celular con el que se graba =====
+   Para una historia de Instagram hace falta que la tabla tenga nombres, y
+   para probar como se ve vacia hace falta poder vaciarla. Todo lo que se
+   toca aca sale por el mismo canal que una pina real, asi que el totem del
+   iframe -que es el de verdad- se actualiza solo, sin recargar nada. */
+'var q=CLAVE?("?clave="+encodeURIComponent(CLAVE)):"";',
+'var sexo="M";',
+'function llamar(ruta,datos){',
+'  return fetch(ruta+q,{method:"POST",headers:{"Content-Type":"application/json"},',
+'    body:JSON.stringify(datos||{})}).then(function(r){return r.json();})',
+'  .then(function(d){ verLista(); return d; })',
+'  .catch(function(){ return null; });',
+'}',
+'function verLista(){',
+'  fetch("/api/estado"+q).then(function(r){return r.json();}).then(function(e){',
+'    var l=(sexo==="F"?e.mujeres:e.noche)||[];',
+'    var c=document.getElementById("lista");',
+'    if(!l.length){ c.innerHTML=\'<div class="vacia">No hay nadie anotado. As&iacute; se ve el t&oacute;tem vac&iacute;o: tres puestos grandes y el cuarto asom&aacute;ndose.</div>\'; return; }',
+'    c.innerHTML="";',
+'    l.forEach(function(p,i){',
+'      var f=document.createElement("div"); f.className="nom";',
+'      var t=document.createElement("span"); t.className="t"; t.textContent=(i+1)+". "+p.nombre;',
+'      var s=document.createElement("span"); s.className="s"; s.textContent=p.score;',
+'      var x=document.createElement("button"); x.className="x"; x.textContent="\\u00d7";',
+'      x.title="sacar del ranking";',
+'      x.onclick=function(){ llamar("/api/probar/quitar",{apodo:p.nombre}); };',
+'      f.appendChild(t); f.appendChild(s); f.appendChild(x); c.appendChild(f);',
+'    });',
+'  }).catch(function(){});',
+'}',
+'function marcarSexo(){',
+'  document.getElementById("sM").classList.toggle("on",sexo==="M");',
+'  document.getElementById("sF").classList.toggle("on",sexo==="F");',
+'  verLista();',
+'}',
+'document.getElementById("sM").onclick=function(){sexo="M";marcarSexo();};',
+'document.getElementById("sF").onclick=function(){sexo="F";marcarSexo();};',
+'document.getElementById("mas1").onclick=function(){llamar("/api/probar/llenar",{cuantos:1,sexo:sexo});};',
+'document.getElementById("mas3").onclick=function(){llamar("/api/probar/llenar",{cuantos:3,sexo:sexo});};',
+'document.getElementById("mas10").onclick=function(){llamar("/api/probar/llenar",{cuantos:10,sexo:sexo});};',
+'document.getElementById("borrarP").onclick=function(){llamar("/api/probar/limpiar");};',
+'document.getElementById("desco").onclick=function(){llamar("/api/probar/descoronar");};',
+'var hoja=document.getElementById("hoja");',
+'document.getElementById("bRank").onclick=function(){',
+'  var ver=!hoja.classList.contains("ver");',
+'  hoja.classList.toggle("ver",ver); this.classList.toggle("on",ver);',
+'  if(ver)verLista();',
 '};',
+'document.getElementById("cerrarHoja").onclick=function(){',
+'  hoja.classList.remove("ver");',
+'  document.getElementById("bRank").classList.remove("on");',
+'};',
+/* Safari de iOS no tiene requestFullscreen fuera de los videos: el boton
+   quedaba puesto y no hacia nada. Si el navegador no la soporta, en vez de
+   un boton muerto se explica el camino que SI funciona. */
+'var hayFull=!!(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen);',
+'var bF=document.getElementById("bFull");',
+'if(!hayFull){',
+'  bF.textContent="SACAR LA BARRA";',
+'  bF.onclick=function(){',
+'    document.getElementById("cartel").classList.add("ver");',
+'  };',
+'}else{',
+'  bF.onclick=function(){',
+'    var d=document.documentElement;',
+'    try{',
+'      if(document.fullscreenElement||document.webkitFullscreenElement){',
+'        (document.exitFullscreen||document.webkitExitFullscreen).call(document);',
+'      }else{',
+'        (d.requestFullscreen||d.webkitRequestFullscreen).call(d);',
+'      }',
+'    }catch(e){}',
+'    setTimeout(acomodar,400);',
+'  };',
+'}',
+'var cc=document.getElementById("cartel");',
+'if(cc)cc.onclick=function(){this.classList.remove("ver");};',
 '<\/script></body></html>'
   ].join('\n');
 
@@ -1088,6 +1219,65 @@ module.exports = function montarPinas(app, ctx) {
     guardar();
     log('PRUEBA', 'giro desbloqueado (' + n + ' pi\u00f1as) para ' + (apodo || disp));
     res.json({ ok: true, liberadas: n });
+  });
+
+  // Nombres de mentira para llenar el ranking desde el celular y ver como
+  // queda la pantalla con gente. Son los nombres que de verdad se escriben
+  // en el bar: si la maqueta se prueba con "Test 1" no se prueba nada.
+  const NOMBRES_M = ['EL RUSO', 'JOSE', 'NACHO', 'EL FLACO', 'TONY', 'MARTIN',
+                     'EL NEGRO PABLO', 'JUANMA', 'EL CHAQUE\u00d1O', 'LUCHO'];
+  const NOMBRES_F = ['CAMI', 'SOFI', 'LU', 'AGUS', 'MECHI', 'JOSE', 'VALEN',
+                     'ROCIO', 'BELEN', 'FLOR'];
+
+  app.post('/api/probar/llenar', function (req, res) {
+    if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
+    const b = req.body || {};
+    const cuantos = Math.max(1, Math.min(10, Math.floor(Number(b.cuantos) || 1)));
+    const fem = (b.sexo === 'F');
+    const fuente = fem ? NOMBRES_F : NOMBRES_M;
+    const hoy = nocheHoy();
+    // No repetir a alguien que ya esta: el ranking toma el mejor golpe por
+    // persona, asi que un nombre repetido no agrega una fila y parece roto.
+    const puestos = {};
+    pinas.forEach(function (p) { if (p.noche === hoy) puestos[clavePersona(p.apodo)] = 1; });
+    const ahora = Date.now();
+    const hechos = [];
+    for (let i = 0; i < fuente.length && hechos.length < cuantos; i++) {
+      const nombre = fuente[i];
+      if (puestos[clavePersona(nombre)]) continue;
+      puestos[clavePersona(nombre)] = 1;
+      const score = 380 + crypto.randomInt(0, 570);
+      pinas.push({
+        id: 'p' + (ahora + hechos.length).toString(36) + crypto.randomBytes(2).toString('hex'),
+        ts: ahora + hechos.length, noche: hoy, apodo: nombre, ig: '',
+        sexo: fem ? 'F' : 'M', score: score, foto: null,
+        envio: null, disp: null, huella: null, giro: false, gajo: null,
+        aprobada: true, oculta: false, ip: 'prueba', prueba: true
+      });
+      hechos.push({ apodo: nombre, score: score });
+    }
+    guardar();
+    emitir('estado', estado());
+    log('PRUEBA', 'ranking rellenado con ' + hechos.length + ' nombres');
+    res.json({ ok: true, agregados: hechos });
+  });
+
+  // Sacar UN nombre del ranking desde la vista en vivo. No borra la pina: la
+  // oculta, que es lo mismo que hace la pantalla de moderacion. Asi sirve
+  // igual para un nombre de prueba que para uno real que no puede salir.
+  app.post('/api/probar/quitar', function (req, res) {
+    if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
+    const apodo = limpiar((req.body || {}).apodo, 14);
+    if (!apodo) return res.status(400).json({ error: 'falta el nombre' });
+    const hoy = nocheHoy(), k = clavePersona(apodo);
+    let n = 0;
+    pinas.forEach(function (p) {
+      if (p.noche === hoy && clavePersona(p.apodo) === k && !p.oculta) { p.oculta = true; n++; }
+    });
+    guardar();
+    emitir('estado', estado());
+    log('PRUEBA', 'sacado del ranking: ' + apodo + ' (' + n + ' pi\u00f1as ocultas)');
+    res.json({ ok: true, ocultas: n });
   });
 
   app.post('/api/probar/limpiar', function (req, res) {
