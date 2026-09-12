@@ -985,7 +985,10 @@ module.exports = function montarPinas(app, ctx) {
 '#hoja .linea .b{padding:11px 6px;font-size:13px}',
 '.nom{display:flex;align-items:center;gap:10px;padding:9px 12px;margin-bottom:7px;',
 '  background:#141720;border:1px solid #232833;border-radius:11px}',
+'.nom.real{border-color:#3c4a2a;background:#161b12}',
 '.nom .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px}',
+'.nom .et2{margin-left:8px;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;',
+'  color:#9ccc65;border:1px solid #3c4a2a;border-radius:5px;padding:2px 5px;vertical-align:1px}',
 '.nom .s{color:#FFD518;font-weight:800;font-size:14px}',
 '.nom .x{flex:none;width:38px;height:34px;border:1px solid #47212a;background:#24141a;color:#ff6b7d;',
 '  border-radius:9px;font-size:17px;font-weight:800;line-height:1}',
@@ -1020,7 +1023,7 @@ module.exports = function montarPinas(app, ctx) {
 '<button class="b" id="mas10">Llenar 10</button>',
 '</div>',
 '<div class="linea">',
-'<button class="b" id="borrarP">Borrar los de prueba</button>',
+'<button class="b" id="borrarP">Vaciar los de prueba de hoy</button>',
 '<button class="b" id="desco">Descoronar</button>',
 '</div>',
 '<div class="linea"><button class="b" id="cerrarHoja">Listo</button></div>',
@@ -1087,18 +1090,24 @@ module.exports = function montarPinas(app, ctx) {
 '  .catch(function(){ return null; });',
 '}',
 'function verLista(){',
-'  fetch("/api/estado"+q).then(function(r){return r.json();}).then(function(e){',
-'    var l=(sexo==="F"?e.mujeres:e.noche)||[];',
+'  fetch("/api/probar/lista"+q).then(function(r){return r.json();}).then(function(e){',
+'    var l=(sexo==="F"?e.mujeres:e.todos)||[];',
 '    var c=document.getElementById("lista");',
-'    if(!l.length){ c.innerHTML=\'<div class="vacia">No hay nadie anotado. As&iacute; se ve el t&oacute;tem vac&iacute;o: tres puestos grandes y el cuarto asom&aacute;ndose.</div>\'; return; }',
+'    if(!l.length){ c.innerHTML=\'<div class="vacia">No hay nadie anotado esta noche. As&iacute; se ve el t&oacute;tem vac&iacute;o: tres puestos grandes y el cuarto asom&aacute;ndose.</div>\'; return; }',
 '    c.innerHTML="";',
 '    l.forEach(function(p,i){',
-'      var f=document.createElement("div"); f.className="nom";',
+'      var f=document.createElement("div"); f.className="nom"+(p.prueba?"":" real");',
 '      var t=document.createElement("span"); t.className="t"; t.textContent=(i+1)+". "+p.nombre;',
+/* Marcar cual es una persona de verdad no es un detalle: la cruz hace dos
+   cosas distintas segun el caso, y hay que verlo ANTES de tocarla. */
+'      if(!p.prueba){ var e2=document.createElement("span"); e2.className="et2"; e2.textContent="real"; t.appendChild(e2); }',
 '      var s=document.createElement("span"); s.className="s"; s.textContent=p.score;',
 '      var x=document.createElement("button"); x.className="x"; x.textContent="\\u00d7";',
-'      x.title="sacar del ranking";',
-'      x.onclick=function(){ llamar("/api/probar/quitar",{apodo:p.nombre}); };',
+'      x.title=p.prueba?"borrar este nombre de prueba":"ocultar del ranking (no se borra)";',
+'      x.onclick=function(){',
+'        if(!p.prueba && !confirm(p.nombre+" es una persona de verdad.\\n\\nSe va a OCULTAR del ranking, no se borra: la pi\\u00f1a y la foto quedan, y lo pod\\u00e9s volver a mostrar desde Fotos.\\n\\n\\u00bfLo saco?")) return;',
+'        llamar("/api/probar/quitar",{apodo:p.nombre});',
+'      };',
 '      f.appendChild(t); f.appendChild(s); f.appendChild(x); c.appendChild(f);',
 '    });',
 '  }).catch(function(){});',
@@ -1113,7 +1122,7 @@ module.exports = function montarPinas(app, ctx) {
 'document.getElementById("mas1").onclick=function(){llamar("/api/probar/llenar",{cuantos:1,sexo:sexo});};',
 'document.getElementById("mas3").onclick=function(){llamar("/api/probar/llenar",{cuantos:3,sexo:sexo});};',
 'document.getElementById("mas10").onclick=function(){llamar("/api/probar/llenar",{cuantos:10,sexo:sexo});};',
-'document.getElementById("borrarP").onclick=function(){llamar("/api/probar/limpiar");};',
+'document.getElementById("borrarP").onclick=function(){llamar("/api/probar/limpiar",{soloHoy:true});};',
 'document.getElementById("desco").onclick=function(){llamar("/api/probar/descoronar");};',
 'var hoja=document.getElementById("hoja");',
 'document.getElementById("bRank").onclick=function(){',
@@ -1164,12 +1173,23 @@ module.exports = function montarPinas(app, ctx) {
      tener que esperar a que sea sabado a las 3 de la manana con el bar lleno.
      Las pinas que se cargan desde aca quedan marcadas y se borran todas
      juntas con un boton, asi no ensucian las metricas de verdad. */
-  function limpiarPruebas() {
+  /* soloHoy = true borra unicamente las pruebas de la noche en curso. Es lo
+     que se usa desde la vista en vivo: ahi el boton dice "borrar los de
+     prueba" y se entiende que habla de lo que estas viendo en la pantalla,
+     no de las pruebas de la semana pasada. Sin esto, tocarlo mientras
+     armabas el ranking de hoy te barria tambien lo de las noches
+     anteriores, y de paso cambiaba numeros del historial. */
+  function limpiarPruebas(soloHoy) {
+    const hoy = nocheHoy();
+    const alcance = function (p) { return p.prueba && (!soloHoy || p.noche === hoy); };
     const antesP = pinas.length, antesX = premios.length;
     const ids = {};
-    pinas.forEach(function (p) { if (p.prueba) ids[p.id] = 1; });
-    pinas = pinas.filter(function (p) { return !p.prueba; });
-    premios = premios.filter(function (x) { return !(x.pina && ids[x.pina]) && !x.prueba; });
+    pinas.forEach(function (p) { if (alcance(p)) ids[p.id] = 1; });
+    pinas = pinas.filter(function (p) { return !alcance(p); });
+    premios = premios.filter(function (x) {
+      if (x.pina && ids[x.pina]) return false;
+      return !(x.prueba && (!soloHoy || x.noche === hoy));
+    });
     guardar();
     return { pinas: antesP - pinas.length, premios: antesX - premios.length };
   }
@@ -1224,65 +1244,175 @@ module.exports = function montarPinas(app, ctx) {
   // Nombres de mentira para llenar el ranking desde el celular y ver como
   // queda la pantalla con gente. Son los nombres que de verdad se escriben
   // en el bar: si la maqueta se prueba con "Test 1" no se prueba nada.
+  // LAS DOS LISTAS NO COMPARTEN NINGUN NOMBRE. Antes "JOSE" estaba en las
+  // dos: al llenar mujeres aparecia JOSE, y como el ranking de la noche
+  // incluye a todos, el mismo JOSE salia arriba en la tabla de hombres.
+  // Eso era lo que se veia "entremezclado".
   const NOMBRES_M = ['EL RUSO', 'JOSE', 'NACHO', 'EL FLACO', 'TONY', 'MARTIN',
-                     'EL NEGRO PABLO', 'JUANMA', 'EL CHAQUE\u00d1O', 'LUCHO'];
-  const NOMBRES_F = ['CAMI', 'SOFI', 'LU', 'AGUS', 'MECHI', 'JOSE', 'VALEN',
-                     'ROCIO', 'BELEN', 'FLOR'];
+                     'EL NEGRO PABLO', 'JUANMA', 'EL CHAQUENO', 'LUCHO',
+                     'DIEGO', 'FACU', 'EL TANO', 'MATI', 'BRIAN', 'EL PELADO',
+                     'GASTON', 'JULI', 'EL MONO', 'SANTI', 'EMA', 'TOBI'];
+  const NOMBRES_F = ['CAMI', 'SOFI', 'LU', 'AGUS', 'MECHI', 'VALEN',
+                     'ROCIO', 'BELEN', 'FLOR', 'ANTO', 'JULI ROJAS', 'PILAR',
+                     'MORE', 'CANDE', 'MAGA', 'NAI', 'ORNE', 'BRISA'];
+
+  /* ---- puntajes que invitan a jugar ----
+     Un ranking inventado no es decorado: es lo que ve el que esta parado
+     frente a la maquina decidiendo si gasta $2.000. Dos errores lo arruinan:
+       - un puntero cerca de 999 -el tope real de la maquina- convierte la
+         tabla en algo imposible y el tipo no juega;
+       - huecos enormes entre puestos hacen que entrar parezca lejisimo.
+     Asi que el puntero sale entre 640 y 810 (alto, creible, alcanzable) y
+     cada puesto siguiente baja poco: entre 14 y 46 puntos. El hueco mas
+     chico es justo el de arriba de todo, que es donde se juega la birra.
+     Si ya hay gente real anotada, los de prueba entran POR DEBAJO del que
+     va ganando: nadie quiere que un nombre inventado le tape el suyo. */
+  function puntajesDeJuego(cuantos, techo) {
+    const tope = Math.max(120, Math.min(techo || 999, 810));
+    let s = tope - crypto.randomInt(0, Math.max(1, Math.min(170, tope - 140)));
+    const salida = [];
+    for (let i = 0; i < cuantos; i++) {
+      salida.push(s);
+      const hueco = (i === 0 ? 14 + crypto.randomInt(0, 12) : 20 + crypto.randomInt(0, 27));
+      s = Math.max(90, s - hueco);
+    }
+    return salida;
+  }
+
+  // Nombres ya usados hace poco, para no repetir siempre los mismos cinco.
+  function usadosUltimamente(dias) {
+    const limite = Date.now() - (dias || 7) * 24 * 3600e3;
+    const m = {};
+    pinas.forEach(function (p) { if (p.ts >= limite) m[clavePersona(p.apodo)] = 1; });
+    return m;
+  }
+
+  /* La lista que ve la vista en vivo. No alcanza con /api/estado: ahi no se
+     distingue un nombre inventado de una persona de verdad, y son cosas muy
+     distintas a la hora de tocar la cruz. Devuelve solo la noche de HOY. */
+  app.get('/api/probar/lista', function (req, res) {
+    if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
+    const hoy = nocheHoy();
+    const dela = pinas.filter(function (p) { return p.noche === hoy; });
+    const armar = function (filtro) {
+      return mejorPorPersona(dela.filter(function (p) { return visible(p) && filtro(p); }))
+        .map(function (x) {
+          const suyas = dela.filter(function (p) { return clavePersona(p.apodo) === clavePersona(x.nombre); });
+          return { nombre: x.nombre, score: x.score, ig: x.ig,
+                   prueba: suyas.length > 0 && suyas.every(function (p) { return p.prueba; }) };
+        });
+    };
+    res.json({
+      noche: hoy,
+      todos:   armar(function () { return true; }),
+      mujeres: armar(function (p) { return p.sexo === 'F'; }),
+      // cuantos nombres quedan sin usar, para avisar antes de que "+1" no haga nada
+      libresM: NOMBRES_M.length, libresF: NOMBRES_F.length
+    });
+  });
 
   app.post('/api/probar/llenar', function (req, res) {
     if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
     const b = req.body || {};
     const cuantos = Math.max(1, Math.min(10, Math.floor(Number(b.cuantos) || 1)));
     const fem = (b.sexo === 'F');
-    const fuente = fem ? NOMBRES_F : NOMBRES_M;
     const hoy = nocheHoy();
-    // No repetir a alguien que ya esta: el ranking toma el mejor golpe por
-    // persona, asi que un nombre repetido no agrega una fila y parece roto.
-    const puestos = {};
-    pinas.forEach(function (p) { if (p.noche === hoy) puestos[clavePersona(p.apodo)] = 1; });
+
+    /* Quien NO puede repetirse: el que ya esta VISIBLE esta noche. Antes se
+       miraban todas las pinas de la noche, ocultas incluidas, asi que en
+       cuanto sacabas un nombre de la tabla ese nombre quedaba quemado y
+       "+1" no lo volvia a traer: despues de unos cuantos toques ya no
+       agregaba nada y parecia roto. */
+    const enTabla = {};
+    pinas.forEach(function (p) {
+      if (p.noche === hoy && visible(p)) enTabla[clavePersona(p.apodo)] = 1;
+    });
+    const viejos = usadosUltimamente(7);
+
+    // Primero los que no salieron en toda la semana; si no alcanzan, se
+    // completa con el resto. Y el orden se sortea, para que no salgan
+    // siempre en la misma secuencia.
+    const fuente = (fem ? NOMBRES_F : NOMBRES_M).filter(function (n) {
+      return !enTabla[clavePersona(n)];
+    });
+    const frescos = fuente.filter(function (n) { return !viejos[clavePersona(n)]; });
+    const repetibles = fuente.filter(function (n) { return viejos[clavePersona(n)]; });
+    const mezclar = function (lista) {
+      const a = lista.slice();
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = crypto.randomInt(0, i + 1);
+        const t = a[i]; a[i] = a[j]; a[j] = t;
+      }
+      return a;
+    };
+    const orden = mezclar(frescos).concat(mezclar(repetibles));
+
+    // El techo: si ya hay alguien real arriba, los inventados entran abajo.
+    const actual = mejorPorPersona(pinas.filter(function (p) {
+      return visible(p) && p.noche === hoy;
+    }));
+    const realArriba = actual.filter(function (x) { return x.score > 0; })[0];
+    const techo = realArriba ? Math.max(140, realArriba.score - 12) : 810;
+
+    const elegidos = orden.slice(0, cuantos);
+    const puntos = puntajesDeJuego(elegidos.length, techo);
     const ahora = Date.now();
     const hechos = [];
-    for (let i = 0; i < fuente.length && hechos.length < cuantos; i++) {
-      const nombre = fuente[i];
-      if (puestos[clavePersona(nombre)]) continue;
-      puestos[clavePersona(nombre)] = 1;
-      const score = 380 + crypto.randomInt(0, 570);
+    elegidos.forEach(function (nombre, i) {
       pinas.push({
-        id: 'p' + (ahora + hechos.length).toString(36) + crypto.randomBytes(2).toString('hex'),
-        ts: ahora + hechos.length, noche: hoy, apodo: nombre, ig: '',
-        sexo: fem ? 'F' : 'M', score: score, foto: null,
+        id: 'p' + (ahora + i).toString(36) + crypto.randomBytes(2).toString('hex'),
+        ts: ahora + i, noche: hoy, apodo: nombre, ig: '',
+        sexo: fem ? 'F' : 'M', score: puntos[i], foto: null,
         envio: null, disp: null, huella: null, giro: false, gajo: null,
         aprobada: true, oculta: false, ip: 'prueba', prueba: true
       });
-      hechos.push({ apodo: nombre, score: score });
-    }
+      hechos.push({ apodo: nombre, score: puntos[i] });
+    });
     guardar();
     emitir('estado', estado());
     log('PRUEBA', 'ranking rellenado con ' + hechos.length + ' nombres');
-    res.json({ ok: true, agregados: hechos });
+    res.json({ ok: true, agregados: hechos,
+               sinLugar: elegidos.length < cuantos ? (cuantos - elegidos.length) : 0 });
   });
 
-  // Sacar UN nombre del ranking desde la vista en vivo. No borra la pina: la
-  // oculta, que es lo mismo que hace la pantalla de moderacion. Asi sirve
-  // igual para un nombre de prueba que para uno real que no puede salir.
+  /* Sacar UN nombre del ranking desde la vista en vivo.
+     Hay dos casos y NO son lo mismo:
+       - si es de prueba, se borra de verdad y desaparece del archivo;
+       - si es de una persona de verdad, NO se borra nada: se oculta, igual
+         que en la pantalla de moderacion, y se puede volver a mostrar desde
+         /fotos. Borrar la pina de alguien que pago seria perderle el puntaje
+         y la foto para siempre por tocar una cruz en el celular.
+     Ademas solo toca la noche de HOY: nunca las de ayer. */
   app.post('/api/probar/quitar', function (req, res) {
     if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
     const apodo = limpiar((req.body || {}).apodo, 14);
     if (!apodo) return res.status(400).json({ error: 'falta el nombre' });
     const hoy = nocheHoy(), k = clavePersona(apodo);
-    let n = 0;
-    pinas.forEach(function (p) {
-      if (p.noche === hoy && clavePersona(p.apodo) === k && !p.oculta) { p.oculta = true; n++; }
+    const suyas = pinas.filter(function (p) {
+      return p.noche === hoy && clavePersona(p.apodo) === k;
     });
+    const todasDePrueba = suyas.length > 0 && suyas.every(function (p) { return p.prueba; });
+    let borradas = 0, ocultas = 0;
+    if (todasDePrueba) {
+      const ids = {};
+      suyas.forEach(function (p) { ids[p.id] = 1; });
+      const antes = pinas.length;
+      pinas = pinas.filter(function (p) { return !ids[p.id]; });
+      premios = premios.filter(function (x) { return !(x.pina && ids[x.pina]); });
+      borradas = antes - pinas.length;
+    } else {
+      suyas.forEach(function (p) { if (!p.oculta) { p.oculta = true; ocultas++; } });
+    }
     guardar();
     emitir('estado', estado());
-    log('PRUEBA', 'sacado del ranking: ' + apodo + ' (' + n + ' pi\u00f1as ocultas)');
-    res.json({ ok: true, ocultas: n });
+    log('PRUEBA', 'sacado del ranking: ' + apodo +
+      (borradas ? ' (' + borradas + ' de prueba, borradas)' : ' (' + ocultas + ' reales, ocultas)'));
+    res.json({ ok: true, borradas: borradas, ocultas: ocultas, eraDePrueba: todasDePrueba });
   });
 
   app.post('/api/probar/limpiar', function (req, res) {
     if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
-    const r = limpiarPruebas();
+    const r = limpiarPruebas(!!(req.body || {}).soloHoy);
     emitir('estado', estado());
     log('PRUEBA', 'borradas ' + r.pinas + ' pi\u00f1as de prueba y ' + r.premios + ' premios');
     res.json({ ok: true, borradas: r });
