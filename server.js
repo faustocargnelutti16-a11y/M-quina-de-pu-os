@@ -313,6 +313,10 @@ let redDesde = 0;
 // null y todo lo que lo use tiene que preguntar antes. Si el modulo no carga,
 // el server sigue cobrando igual, solo que sin panel.
 let MET = null;
+// Lo que devuelve el modulo de pinas. Igual que MET: si el modulo no llego a
+// montarse, esto queda en null y el panel no muestra su bloque, pero el
+// cobro sigue andando.
+let PIN = null;
 
 /* Cuanto hace que el Shelly esta prendido, en segundos, tal como el nos lo
    dice en cada consulta. Es el dato que separa "se apago la maquina" de "se
@@ -2114,6 +2118,43 @@ app.get('/admin', function (req, res) {
 'Servidor desde \u00b7 <b>' + new Date(arranque).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) + '</b>' +
 '</div></div>' +
 
+/* LA TELE, APARTE DE LA MAQUINA. Son dos cosas distintas y hasta ahora el
+   panel solo miraba una. El Shelly dice si la maquina puede cobrar; esto
+   dice si la PANTALLA esta mostrando algo. Se puede estar cobrando con la
+   tele negra toda la noche -se pierde todo el juego y no se entera nadie- y
+   al reves tambien. */
+(function () {
+  if (!PIN || !PIN.estadoTotem) return '';
+  let t;
+  try { t = PIN.estadoTotem(); } catch (e) { return ''; }
+  const color = t.prendido ? '#7BD88F' : '#ff9a9c';
+  const cuanto = function (ms) {
+    if (ms === null || ms === undefined) return 'nunca';
+    const m = Math.round(ms / 60000);
+    if (m < 1) return 'reci\u00e9n';
+    if (m < 60) return 'hace ' + m + ' min';
+    const h = Math.floor(m / 60);
+    return 'hace ' + h + ' h ' + (m % 60) + ' min';
+  };
+  return '<div class="seccion">' +
+    '<h2 class="titulo">T\u00f3tem (la pantalla)</h2>' +
+    '<div class="datos">' +
+    'Ahora \u00b7 <b style="color:' + color + '">' +
+      (t.prendido ? 'PRENDIDO' : 'APAGADO O SIN INTERNET') + '</b><br>' +
+    (t.prendido
+      ? 'Pantallas mostr\u00e1ndolo \u00b7 <b>' + t.pantallas + '</b><br>' +
+        (t.desde ? 'Prendido desde \u00b7 <b>' + horaCorta(t.desde) + '</b><br>' : '')
+      : '\u00daltima vez que se vio \u00b7 <b>' +
+        (t.ultimo ? horaCorta(t.ultimo) + ' (' + cuanto(t.haceMs) + ')' : 'nunca') + '</b><br>') +
+    '</div>' +
+    '<p class="lectura tenue" style="margin-top:8px">Esto NO es lo mismo que la m\u00e1quina. ' +
+    'La m\u00e1quina puede estar cobrando con la tele negra: ah\u00ed se pierde el ranking, el premio y ' +
+    'las ganas de tirar otra vez, y desde ac\u00e1 no se notaba. Se mide por la conexi\u00f3n que el ' +
+    't\u00f3tem mantiene abierta mientras est\u00e1 en pantalla, as\u00ed que dice tele + internet + ' +
+    'navegador, las tres juntas. Mirarlo desde tu celular con \u201cVer en vivo\u201d no cuenta.</p>' +
+    '</div>';
+})() +
+
 '<div class="seccion">' +
 '<h2 class="titulo">Ver m\u00e1s</h2>' +
 '<div class="botones">' +
@@ -2335,7 +2376,7 @@ try {
 // Si este modulo falla, el cobro sigue funcionando igual.
 try {
   const montarPinas = require('./pinas');
-  montarPinas(app, {
+  PIN = montarPinas(app, {
     DATA_DIR: DATA_DIR,
     persistenciaOk: persistenciaOk,
     log: log,
