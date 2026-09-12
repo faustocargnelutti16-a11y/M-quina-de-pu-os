@@ -216,12 +216,21 @@ module.exports = function montarPinas(app, ctx) {
   function estado() {
     const hoy = nocheHoy();
     const dela = pinas.filter(function (p) { return visible(p) && p.noche === hoy; });
-    const todas = pinas.filter(visible);
-    const record = todas.reduce(function (a, p) { return (!a || p.score > a.score) ? p : a; }, null);
+    /* EL HISTORICO Y EL RECORD NO LLEVAN PRUEBAS.
+       Las pinas inventadas sirven para ver como queda la pantalla de ESTA
+       noche llena, y para eso tienen que entrar en el ranking de la noche.
+       Pero el historico es la historia del bar y el record es el record de
+       la casa: si un nombre inventado se mete ahi, el totem le muestra a la
+       gente puntajes que nadie pego nunca, y la proxima persona que pegue
+       de verdad no puede romper un record que no existe. Por eso se ven
+       mezclados los nombres nuevos con los viejos en la pestana HISTORICO:
+       eran las pruebas. */
+    const reales = pinas.filter(function (p) { return visible(p) && !p.prueba; });
+    const record = reales.reduce(function (a, p) { return (!a || p.score > a.score) ? p : a; }, null);
     return {
       noche:     mejorPorPersona(dela),
       mujeres:   mejorPorPersona(dela.filter(function (p) { return p.sexo === 'F'; })),
-      historico: mejorPorPersona(todas),
+      historico: mejorPorPersona(reales),
       record:    record ? { score: record.score, nombre: record.apodo } : { score: 0, nombre: null },
       pinas:     dela.length,
       // Si ya se corono al rey, viaja en el estado: asi el totem lo sigue
@@ -377,6 +386,57 @@ module.exports = function montarPinas(app, ctx) {
     });
   }
 
+  /* ===== LA TELE ESTA PRENDIDA O NO =====
+     El Shelly dice si la MAQUINA puede cobrar. De la PANTALLA no dice nada:
+     la tele puede estar negra toda la noche y la maquina cobrando igual, y
+     desde el panel eso no se veia. Pero el totem, mientras esta en pantalla,
+     mantiene abierta una conexion con el servidor y la reabre sola si se
+     corta. Si esa conexion esta, la tele esta prendida, con internet y con
+     el navegador andando: las tres cosas a la vez. Si no esta, algo de eso
+     falta.
+     Se distingue el totem DE VERDAD del espejo de /vivo: si no, alcanzaba
+     con que vos miraras la pantalla desde el celular para que el panel
+     dijera que la tele estaba prendida, que es justo la mentira que no
+     queremos. */
+  const F_TOTEM = path.join(DATA_DIR, 'totem.json');
+  let visto = leer(F_TOTEM, { ultimo: 0, desde: 0 });
+  let guardandoVisto = false;
+
+  function anotarTotem(conectado) {
+    const ahora = Date.now();
+    // Si venia cortado hace rato, esto es un encendido: se anota cuando
+    // arranco, que es lo que despues deja decir "prendida desde las 17:40".
+    if (conectado && (ahora - (visto.ultimo || 0)) > 90000) visto.desde = ahora;
+    visto.ultimo = ahora;
+    if (!persistenciaOk || guardandoVisto) return;
+    guardandoVisto = true;
+    setTimeout(function () {
+      guardandoVisto = false;
+      try { escribirAtomico(F_TOTEM, JSON.stringify(visto)); } catch (e) {}
+    }, 10000);
+  }
+
+  function totemesConectados() {
+    let n = 0;
+    clientes.forEach(function (r) { if (r._esTotem) n++; });
+    return n;
+  }
+
+  function estadoTotem() {
+    const vivos = totemesConectados();
+    const ahora = Date.now();
+    // 90 s de gracia: el latido va cada 25 s, asi que tres latidos perdidos
+    // ya son un corte de verdad y no una recarga de pagina.
+    const prendido = vivos > 0 || (ahora - (visto.ultimo || 0)) < 90000;
+    return {
+      prendido: prendido,
+      pantallas: vivos,
+      ultimo: visto.ultimo || 0,
+      desde: prendido ? (visto.desde || 0) : 0,
+      haceMs: visto.ultimo ? (ahora - visto.ultimo) : null
+    };
+  }
+
   app.get('/api/stream', function (req, res) {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -386,12 +446,22 @@ module.exports = function montarPinas(app, ctx) {
     });
     res.write('retry: 3000\n\n');
     res.write('event: estado\ndata: ' + JSON.stringify(estado()) + '\n\n');
+    // El totem se presenta al conectarse. El espejo de /vivo NO cuenta:
+    // ese sos vos mirando desde el celular, y si contara, el panel diria
+    // que la tele esta prendida justo cuando la estas mirando por telefono.
+    const quien = String((req.query && req.query.quien) || '');
+    res._esTotem = (quien === 'totem');
+    if (res._esTotem) anotarTotem(true);
     clientes.add(res);
     req.on('close', function () { clientes.delete(res); });
   });
 
-  // Latido: mantiene viva la conexion con el totem toda la noche.
-  setInterval(function () { emitir('ping', { t: Date.now() }); }, 25000);
+  // Latido: mantiene viva la conexion con el totem toda la noche, y de paso
+  // es el pulso con el que se sabe si la tele sigue ahi.
+  setInterval(function () {
+    emitir('ping', { t: Date.now() });
+    if (totemesConectados() > 0) anotarTotem(true);
+  }, 25000);
 
   /* Cambio de noche.
      El ranking de la noche se arma filtrando por fecha, asi que el servidor
@@ -1651,4 +1721,17 @@ module.exports = function montarPinas(app, ctx) {
 
   log('PI\u00d1AS', 'm\u00f3dulo montado \u00b7 ' + pinas.length + ' pi\u00f1as y ' + premios.length + ' premios en memoria' +
       (persistenciaOk ? '' : ' \u00b7 SIN VOLUMEN: no se van a guardar'));
+
+  // Lo que el panel de /admin necesita saber de aca adentro. Se devuelve en
+  // vez de exponerlo por una ruta: el panel se dibuja en el server, no tiene
+  // sentido que se pida a si mismo por HTTP.
+  return {
+    estadoTotem: estadoTotem,
+    personasDeLaNoche: function () {
+      const hoy = nocheHoy();
+      return mejorPorPersona(pinas.filter(function (p) {
+        return visible(p) && p.noche === hoy;
+      })).length;
+    }
+  };
 };
