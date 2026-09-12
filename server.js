@@ -123,6 +123,15 @@ function guardarCaidas() {
 }
 
 function abrirCaida(desde) {
+  /* Si ya hay una abierta, es la misma caida vista de nuevo (tipico despues
+     de un reinicio del server en plena caida). Abrir otra deja la anterior
+     huerfana para siempre, y despues cada una se cuenta entera todos los
+     dias: asi se llego a "hoy sin poder cobrar: 744 horas". */
+  const abierta = caidas.filter(function (c) { return c.fin === null; })[0];
+  if (abierta) {
+    if (desde < abierta.inicio) abierta.inicio = desde;
+    return;
+  }
   caidas.push({ inicio: desde, fin: null, motivo: null, enHorario: enHorarioDeBar() });
   const limite = Date.now() - 90 * 24 * 60 * 60 * 1000;
   caidas = caidas.filter(function (c) { return c.inicio > limite; });
@@ -130,6 +139,8 @@ function abrirCaida(desde) {
 }
 
 function cerrarCaida() {
+  // Se cierran TODAS las que hayan quedado abiertas, no solo la ultima.
+  let cerrada = null;
   for (let i = caidas.length - 1; i >= 0; i--) {
     if (caidas[i].fin === null) {
       const c = caidas[i];
@@ -160,11 +171,41 @@ function cerrarCaida() {
         c.seguro = false;
         if (c.motivo === 'apagada') { c.apagada = c.inicio; c.prendida = ultimoArranqueShelly; }
       }
-      guardarCaidas();
-      return c;
+      if (!cerrada) cerrada = c;   // la mas reciente es la que se reporta
     }
   }
-  return null;
+  if (cerrada) guardarCaidas();
+  return cerrada;
+}
+
+/* Al arrancar, cualquier caida que haya quedado abierta de una corrida
+   anterior se cierra con lo unico que sabemos con certeza: no pudo seguir
+   abierta despues de que empezara la siguiente, porque no se puede caer algo
+   que ya estaba caido. La ultima de todas queda abierta: esa puede ser real.
+   Se marcan como "incompleta" para no presentarlas como medidas exactas. */
+function cerrarCaidasHuerfanas() {
+  let n = 0;
+  for (let i = 0; i < caidas.length - 1; i++) {
+    if (caidas[i].fin !== null) continue;
+    let sig = null;
+    for (let j = i + 1; j < caidas.length; j++) {
+      if (caidas[j].inicio > caidas[i].inicio) { sig = caidas[j]; break; }
+    }
+    if (!sig) continue;
+    caidas[i].fin = sig.inicio;
+    caidas[i].motivo = caidas[i].motivo || 'wifi';
+    caidas[i].incompleta = true;
+    n++;
+  }
+  if (n) { guardarCaidas(); log('CAIDAS', 'se cerraron ' + n + ' caidas que habian quedado abiertas de corridas anteriores'); }
+}
+
+// 26040 segundos -> "7h 14m". Asi se lee de un vistazo.
+function haceCuanto(seg) {
+  if (!seg || seg <= 0) return null;
+  const m = Math.round(seg / 60);
+  if (m < 60) return m + ' min';
+  return Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm';
 }
 
 // "03:42" en hora de Mendoza. Para los avisos, que se leen en el celular.
@@ -258,6 +299,7 @@ caidas = leerJSON(F_ENCENDIDOS, []);
     log('COLA', 'recuperadas ' + pendingActivation + ' fichas que quedaron sin entregar');
   }
 })();
+try { cerrarCaidasHuerfanas(); } catch (e) {}
 let cantidadProcesados = Object.keys(pagosProcesados).length;
 let ultimoArranqueShelly = 0;
 // Que red wifi esta usando el Shelly y con cuanta senal. El script se lo
@@ -928,6 +970,11 @@ app.get('/estado', function (req, res) {
         ? (redShelly + (senalShelly ? ' (se\u00f1al ' + senalShelly + ' dBm)' : '') +
            (redDesde ? ' desde hace ' + Math.round((Date.now() - redDesde) / 60000) + ' min' : ''))
         : 'no informada (script viejo)') + '\n' +
+    /* El dato que separa "se cayo el wifi" de "la apagaron". Si dice NO
+       INFORMADO, el Shelly tiene el script viejo o su firmware no expone el
+       uptime: sin esto, los cortes se siguen clasificando adivinando. */
+    'prendida hace (segun el Shelly) = ' + (haceCuanto(uptimeShelly) ||
+        '*** NO INFORMADO -> script viejo en el Shelly ***') + '\n' +
     'ultimo arranque del Shelly = ' + (ultimoArranqueShelly ? new Date(ultimoArranqueShelly).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) : 'sin avisos desde que arranco el server') + '\n' +
     'desconexiones desde el arranque = ' + desconexionesHoy + '\n' +
     'base_url = ' + (BASE_URL || '*** FALTA RAILWAY_PUBLIC_DOMAIN ***') + '\n' +
@@ -1924,28 +1971,46 @@ app.get('/admin', function (req, res) {
      Lo unico que importa son los minutos que la maquina no pudo cobrar CON EL
      BAR ABIERTO, y separados en las dos cosas que se arreglan distinto:
      que la prendan tarde, y que se corte con el bar andando. */
-  const minutosAbiertos = function (c) {
-    const fin = c.fin || Date.now();
-    if (MET && MET.minutosAbiertosDe) { try { return MET.minutosAbiertosDe(c.inicio, fin); } catch (e) {} }
-    return c.enHorario ? minutosDe(c) : 0;   // sin el modulo de metricas, lo viejo
+  /* Solo el pedazo de la caida que cae DENTRO de la ventana que se esta
+     mirando. Una caida que arranco anteayer y sigue abierta aporta a "hoy"
+     nada mas que lo de hoy. Sin este recorte, una caida vieja se sumaba
+     entera todos los dias: de ahi salian las 271 horas "de hoy". */
+  const minutosAbiertos = function (c, desde, hasta) {
+    const a = Math.max(c.inicio, desde);
+    const b = Math.min(c.fin || Date.now(), hasta);
+    if (b <= a) return 0;
+    if (MET && MET.minutosAbiertosDe) { try { return MET.minutosAbiertosDe(a, b); } catch (e) {} }
+    return c.enHorario ? Math.round((b - a) / 60000) : 0;   // sin metricas, lo viejo
   };
-  const partir = function (lista) {
+  const partir = function (lista, desde) {
+    const hasta = Date.now();
     let tarde = 0, corte = 0, nTarde = 0, nCorte = 0;
     lista.forEach(function (c) {
-      const m = minutosAbiertos(c);
+      /* De una caida huerfana (quedo abierta por un reinicio viejo) no
+         sabemos cuanto duro de verdad. Meter una duracion inventada en el
+         total es peor que no contarla: se informan aparte. */
+      if (c.incompleta) return;
+      const m = minutosAbiertos(c, desde, hasta);
       if (m <= 0) return;
       // Si la caida ya venia de antes de abrir, lo que se perdio es apertura
       // tardia. Si empezo con el bar ya abierto, es un corte en plena noche.
-      if (MET && MET.abiertoEn && !MET.abiertoEn(c.inicio)) { tarde += m; nTarde++; }
+      if (MET && MET.abiertoEn && !MET.abiertoEn(Math.max(c.inicio, desde))) { tarde += m; nTarde++; }
       else { corte += m; nCorte++; }
     });
     return { tarde: tarde, corte: corte, nTarde: nTarde, nCorte: nCorte, total: tarde + corte };
   };
-  const pHoy = partir(hoy.lista), pSem = partir(sem.lista);
+  const desdeHoy = inicioJornada();
+  const desdeSem = Date.now() - 7 * 24 * 3600e3;
+  const pHoy = partir(hoy.lista, desdeHoy), pSem = partir(sem.lista, desdeSem);
 
+  const incompletas = hoy.lista.filter(function (c) { return c.incompleta; }).length;
   f += '<div class="reparto"><span>Hoy, sin poder cobrar</span><b>' + fmt(pHoy.total) + '</b></div>';
   f += '<div class="reparto"><span>&nbsp;&nbsp;\u00b7 abrio el bar y no estaba prendida</span><b>' + fmt(pHoy.tarde) + '</b></div>';
   f += '<div class="reparto"><span>&nbsp;&nbsp;\u00b7 se corto con el bar abierto</span><b>' + fmt(pHoy.corte) + '</b></div>';
+  if (incompletas) {
+    f += '<div class="reparto" style="opacity:.65"><span>&nbsp;&nbsp;\u00b7 cortes de duraci\u00f3n desconocida</span><b>' +
+      incompletas + '</b></div>';
+  }
   f += '<div class="reparto"><span>7 d\u00edas, sin poder cobrar</span><b>' + fmt(pSem.total) + '</b></div>';
   f += '<div class="reparto"><span>&nbsp;&nbsp;\u00b7 arranques tarde</span><b>' + fmt(pSem.tarde) + ' (' + pSem.nTarde + ')</b></div>';
   f += '<div class="reparto"><span>&nbsp;&nbsp;\u00b7 cortes en plena noche</span><b>' + fmt(pSem.corte) + ' (' + pSem.nCorte + ')</b></div>';
@@ -2014,6 +2079,8 @@ app.get('/admin', function (req, res) {
 '<h2 class="titulo">M\u00e1quina</h2>' +
 '<div class="datos">' +
 '\u00daltima se\u00f1al \u00b7 <b>' + (segDesdePoll < 0 ? 'nunca' : 'hace ' + segDesdePoll + ' s') + '</b><br>' +
+'Prendida hace \u00b7 <b>' + (haceCuanto(uptimeShelly) ||
+  '<span style="color:#ff9a9c">sin dato \u2014 script viejo en el Shelly</span>') + '</b><br>' +
 'Encendida desde \u00b7 <b>' + (ultimoArranqueShelly ? new Date(ultimoArranqueShelly).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) : 'sin dato') + '</b><br>' +
 /* "Se desconecto 3 veces" no sirve para decidir nada: no dice cuando, ni
    cuanto, ni por que, ni si fue con el bar abierto. Todo eso ya esta
