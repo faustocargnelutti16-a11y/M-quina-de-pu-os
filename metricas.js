@@ -787,6 +787,46 @@ module.exports = function montarMetricas(app, ctx) {
     return { txt: 'muy pobre', color: 'mal' };
   }
 
+  /* ---- ANTES Y DESPUES DEL TOTEM ----
+     La fecha en que la pantalla empezo a funcionar. Todo lo anterior es el
+     "antes": la misma maquina, el mismo bar, la misma gente, sin el juego.
+     Es el unico numero que le importa a alguien que va a poner plata: no
+     cuanto factura la maquina, sino CUANTO CAMBIO cuando se le puso esto
+     encima. Y se compara por noche abierta, no por total, porque si un lado
+     tiene mas noches que el otro el total miente solo. */
+  const TOTEM_DESDE = '2026-09-09';
+
+  function antesYDespues() {
+    const lado = { antes: [], despues: [] };
+    historico().forEach(function (j) {
+      if (!j || !j.noche || !j.minAbierta) return;
+      // Una noche sin un peso no es una noche floja: casi siempre es una
+      // noche en que el bar no abrio o la maquina no estaba. Mezclarlas
+      // arruina los dos promedios.
+      if (!j.total) return;
+      (j.noche < TOTEM_DESDE ? lado.antes : lado.despues).push(j);
+    });
+    const prom = function (l, campo) {
+      if (!l.length) return 0;
+      return l.reduce(function (a, j) { return a + (j[campo] || 0); }, 0) / l.length;
+    };
+    const a = prom(lado.antes, 'total'), d = prom(lado.despues, 'total');
+    const suficiente = lado.antes.length >= 3 && lado.despues.length >= 3;
+    return {
+      desde: TOTEM_DESDE,
+      nochesAntes: lado.antes.length,
+      nochesDespues: lado.despues.length,
+      porNocheAntes: a,
+      porNocheDespues: d,
+      totalAntes: lado.antes.reduce(function (x, j) { return x + j.total; }, 0),
+      totalDespues: lado.despues.reduce(function (x, j) { return x + j.total; }, 0),
+      pinasDespues: prom(lado.despues, 'pinas'),
+      personasDespues: prom(lado.despues, 'personas'),
+      cambio: a > 0 ? ((d - a) / a * 100) : null,
+      suficiente: suficiente
+    };
+  }
+
   // ---- las alertas: solo lo que pide una accion ----
   function alertas() {
     const a = [];
@@ -1416,6 +1456,48 @@ module.exports = function montarMetricas(app, ctx) {
     h += '<div class="seccion"><h2 class="titulo">Facturaci\u00f3n</h2>' +
       '<div class="cifra">' + pesos(ing.total) + '</div>' +
       '<p class="lectura">En ' + ing.noches + ' noches, ' + ing.fichas + ' tiros vendidos.</p></div>';
+
+    /* Lo primero que pregunta cualquiera que vaya a poner plata: la maquina
+       sola ya existia, que agrego la pantalla. Se compara POR NOCHE ABIERTA,
+       porque los totales de cada lado dependen de cuantas noches tiene cada
+       uno y eso no compara nada. Y si el "antes" tiene pocas noches se dice,
+       en vez de mostrar un porcentaje que suena espectacular y no se sostiene
+       si el tipo pregunta. Un numero inflado que no aguanta una repregunta
+       cuesta la inversion entera. */
+    const ad = antesYDespues();
+    const fecha = ad.desde.split('-').reverse().join('/');
+    h += '<div class="seccion"><h2 class="titulo">Antes y despu\u00e9s del t\u00f3tem</h2>' +
+      '<div class="cuadrantes">' +
+      '<div class="cua"><div class="et">Antes (' + ad.nochesAntes +
+        (ad.nochesAntes === 1 ? ' noche' : ' noches') + ')</div><div class="va">' +
+        (ad.nochesAntes ? pesos(ad.porNocheAntes) : '&mdash;') + '</div></div>' +
+      '<div class="cua"><div class="et">Despu\u00e9s (' + ad.nochesDespues +
+        (ad.nochesDespues === 1 ? ' noche' : ' noches') + ')</div><div class="va">' +
+        (ad.nochesDespues ? pesos(ad.porNocheDespues) : '&mdash;') + '</div></div>' +
+      '</div>' +
+      '<p class="lectura tenue">Promedio por noche abierta. El t\u00f3tem arranc\u00f3 el ' + fecha + '.</p>';
+    if (ad.cambio !== null && ad.nochesAntes && ad.nochesDespues) {
+      const signo = ad.cambio >= 0 ? '+' : '';
+      h += '<div class="cifra ' + (ad.cambio >= 0 ? 'buena' : 'mala') + '">' +
+        signo + ad.cambio.toFixed(0) + '%</div>';
+      h += '<p class="lectura">' + (ad.suficiente
+        ? 'Con ' + ad.nochesAntes + ' noches de un lado y ' + ad.nochesDespues +
+          ' del otro, la diferencia por noche ya es una se\u00f1al, no una casualidad.'
+        : '<b>Ojo:</b> con ' + ad.nochesAntes + ' ' + (ad.nochesAntes === 1 ? 'noche' : 'noches') +
+          ' antes y ' + ad.nochesDespues + ' despu\u00e9s, este porcentaje todav\u00eda no prueba nada. ' +
+          'Hacen falta al menos tres noches de cada lado, y mejor si son del mismo d\u00eda de semana. ' +
+          'Mostrarlo antes de eso es regalarle la objeci\u00f3n al que escucha.') + '</p>';
+    } else {
+      h += '<p class="lectura tenue">Para comparar hacen falta noches con facturaci\u00f3n de los dos lados del ' +
+        fecha + '. Por ahora solo hay de uno.</p>';
+    }
+    if (ad.nochesDespues) {
+      h += '<div class="reparto" style="margin-top:12px"><span>Pi\u00f1as por noche, con t\u00f3tem</span><b>' +
+        ad.pinasDespues.toFixed(1).replace('.', ',') + '</b></div>' +
+        '<div class="reparto"><span>Personas por noche</span><b>' +
+        ad.personasDespues.toFixed(1).replace('.', ',') + '</b></div>';
+    }
+    h += '</div>';
 
     h += '<div class="seccion"><h2 class="titulo">Piso y techo</h2>';
     if (pt.nNormales || pt.nEventos) {
