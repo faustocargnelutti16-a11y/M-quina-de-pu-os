@@ -1999,11 +1999,15 @@ setTimeout(function(){ try{ armarRueda(); }catch(e){} }, 4000);
     const v=document.getElementById('despierto');
     if(v){try{v.muted=false;v.volume=0.001;const p=v.play();
       if(p&&p.catch)p.catch(()=>{v.muted=true;v.play().catch(()=>{});});}catch(e){}}
-    if(navigator.wakeLock){try{navigator.wakeLock.request('screen');}catch(e){}}
+        if(navigator.wakeLock){try{navigator.wakeLock.request('screen');}catch(e){}}
     try{ac();sonidoPrueba();}catch(e){}
     pedirPantallaCompleta();
-    esconder();
+    setTimeout(esconder,2500);
+    document.addEventListener('fullscreenchange',esconder);
+    document.addEventListener('webkitfullscreenchange',esconder);
     setTimeout(function(){pidiendo=false;},300);
+
+  
   }
 
   /* Cualquier tecla y cualquier toque, en cualquier parte: lo unico que hace
