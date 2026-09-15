@@ -388,7 +388,15 @@ module.exports = function montarMetricas(app, ctx) {
       apagadaAbierto: Math.round(apagadaAbierto),
       cortes: c.length,
       red: redEnEseMomento(desde + 6 * 3600e3),   // a las 18, con el bar abierto
-      tipo: null                                   // 'normal' | 'evento', lo carga Fausto
+      tipo: null,                                  // 'normal' | 'evento', lo carga Fausto
+      /* CONTINGENCIA: una noche que no cuenta como noche.
+         Si llovio y la maquina ni se saco a la vereda, esa noche facturo
+         poco por una razon que no tiene nada que ver con el negocio.
+         Dejarla adentro del promedio arrastra el numero para abajo y
+         ensucia justo la cifra que se le muestra a un inversor. Se marca a
+         mano -el sistema no puede saber que llovio- y queda afuera de
+         todos los promedios, pero sigue visible en la tabla. */
+      cont: null                                   // 'lluvia' | 'apagada' | 'cerrado'
     };
   }
 
@@ -616,7 +624,12 @@ module.exports = function montarMetricas(app, ctx) {
   // ---- piso y techo: noche normal vs noche de evento ----
   function pisoYTecho(dias) {
     const desde = claveHaceDias(dias || 30);
-    const h = historico().filter(function (j) { return j.noche >= desde && j.total > 0; });
+    // Las noches marcadas como contingencia quedan afuera: una noche de
+    // lluvia con la maquina adentro no es una noche floja del negocio, es
+    // una noche que no existio.
+    const h = historico().filter(function (j) {
+      return j.noche >= desde && j.total > 0 && !j.cont;
+    });
     const prom = function (l) { return l.length ? l.reduce(function (a, j) { return a + j.total; }, 0) / l.length : 0; };
     const normales = h.filter(function (j) { return j.tipo === 'normal'; });
     const eventos  = h.filter(function (j) { return j.tipo === 'evento'; });
@@ -798,12 +811,18 @@ module.exports = function montarMetricas(app, ctx) {
 
   function antesYDespues() {
     const lado = { antes: [], despues: [] };
+    let excluidas = 0;
     historico().forEach(function (j) {
       if (!j || !j.noche || !j.minAbierta) return;
       // Una noche sin un peso no es una noche floja: casi siempre es una
       // noche en que el bar no abrio o la maquina no estaba. Mezclarlas
       // arruina los dos promedios.
       if (!j.total) return;
+      // Y una noche marcada como contingencia tampoco entra: son las que
+      // llovio, o la maquina quedo apagada. Se cuentan aparte para poder
+      // decir cuantas se sacaron, que es lo primero que va a preguntar
+      // alguien que mire el numero con desconfianza.
+      if (j.cont) { excluidas++; return; }
       (j.noche < TOTEM_DESDE ? lado.antes : lado.despues).push(j);
     });
     const prom = function (l, campo) {
@@ -823,7 +842,8 @@ module.exports = function montarMetricas(app, ctx) {
       pinasDespues: prom(lado.despues, 'pinas'),
       personasDespues: prom(lado.despues, 'personas'),
       cambio: a > 0 ? ((d - a) / a * 100) : null,
-      suficiente: suficiente
+      suficiente: suficiente,
+      excluidas: excluidas
     };
   }
 
@@ -1361,6 +1381,14 @@ module.exports = function montarMetricas(app, ctx) {
       const j = jornadas.filter(function (x) { return x.noche === marcar; })[0];
       if (j) { j.tipo = tipo || null; guardar(F_JORNADAS, jornadas); }
     }
+    /* Las contingencias van aparte del tipo a proposito: una noche puede ser
+       de evento Y haber llovido. Si compartieran campo, marcar una borraria
+       la otra. Tocar la que ya esta puesta la saca. */
+    const cont = String(req.query.cont || '');
+    if (marcar && (cont === 'lluvia' || cont === 'apagada' || cont === 'cerrado' || cont === '')) {
+      const j = jornadas.filter(function (x) { return x.noche === marcar; })[0];
+      if (j) { j.cont = (j.cont === cont ? null : (cont || null)); guardar(F_JORNADAS, jornadas); }
+    }
 
     /* Historial COMPLETO, no las ultimas 40. Lo que se ve una noche suelta no
        dice nada; lo que dice algo es la serie: si sube, si baja, que dias
@@ -1420,17 +1448,37 @@ module.exports = function montarMetricas(app, ctx) {
       '<td class="der tenue" style="font-size:11px;letter-spacing:.1em">CAJA</td>' +
       '<td class="der tenue" style="font-size:11px;letter-spacing:.1em">PI\u00d1AS</td>' +
       '<td class="der tenue" style="font-size:11px;letter-spacing:.1em">CA\u00cdDA</td>' +
-      '<td class="der"></td></tr>';
+      '<td class="der tenue" style="font-size:11px;letter-spacing:.1em">TIPO</td>' +
+      '<td class="der tenue" style="font-size:11px;letter-spacing:.1em">NO CUENTA</td></tr>';
+    /* La tabla va de la noche mas nueva a la mas vieja, asi que el corte del
+       totem se dibuja cuando se CRUZA hacia abajo esa fecha. Es una sola
+       linea pero cambia como se lee toda la tabla: lo de arriba es con
+       totem, lo de abajo es sin. */
+    let cruzado = false;
     lista.forEach(function (j) {
+      if (!cruzado && j.noche < TOTEM_DESDE) {
+        cruzado = true;
+        h += '<tr><td colspan="6" style="padding:9px 16px;background:var(--oro-suave);' +
+          'color:var(--oro);font-family:\'Share Tech Mono\',monospace;font-size:11px;' +
+          'letter-spacing:.1em">&uarr; CON T\u00d3TEM &nbsp;&middot;&nbsp; desde el ' +
+          TOTEM_DESDE.split('-').reverse().join('/') + ' &nbsp;&middot;&nbsp; SIN T\u00d3TEM &darr;</td></tr>';
+      }
       const d = new Date(j.desde);
       const caido = j.muertoAbierto || 0;
       const color = caido >= 60 ? 'var(--mal)' : (caido >= 15 ? 'var(--medio)' : 'var(--tenue)');
-      h += '<tr><td>' + d.toLocaleDateString('es-AR', { timeZone: TZ, weekday: 'short', day: '2-digit', month: '2-digit' }) + '</td>' +
+      const base = '/noches?marcar=' + j.noche + cAmp + (filtro ? '&ver=' + filtro : '');
+      const cn = function (v, et) {
+        return '<a class="' + (j.cont === v ? 'on' : '') + '" href="' + base + '&cont=' + v + '">' + et + '</a>';
+      };
+      h += '<tr' + (j.cont ? ' style="opacity:.55"' : '') + '>' +
+        '<td>' + d.toLocaleDateString('es-AR', { timeZone: TZ, weekday: 'short', day: '2-digit', month: '2-digit' }) +
+          (j.cont ? '<span style="color:var(--medio);font-size:11px;display:block">no cuenta &middot; ' + j.cont + '</span>' : '') + '</td>' +
         '<td class="der">' + pesos(j.total) + '</td>' +
         '<td class="der">' + (j.pinas || 0) + (j.personas ? '<span style="color:var(--tenue)">/' + j.personas + '</span>' : '') + '</td>' +
         '<td class="der" style="color:' + color + '">' + (caido ? fmtMin(caido) : '&mdash;') + '</td>' +
-        '<td class="der"><a class="' + (j.tipo === 'normal' ? 'on' : '') + '" href="/noches?marcar=' + j.noche + '&tipo=normal' + cAmp + (filtro ? '&ver=' + filtro : '') + '">normal</a> ' +
-        '<a class="' + (j.tipo === 'evento' ? 'on' : '') + '" href="/noches?marcar=' + j.noche + '&tipo=evento' + cAmp + (filtro ? '&ver=' + filtro : '') + '">evento</a></td></tr>';
+        '<td class="der"><a class="' + (j.tipo === 'normal' ? 'on' : '') + '" href="' + base + '&tipo=normal">normal</a> ' +
+        '<a class="' + (j.tipo === 'evento' ? 'on' : '') + '" href="' + base + '&tipo=evento">evento</a></td>' +
+        '<td class="der">' + cn('lluvia', 'lluvia') + ' ' + cn('apagada', 'apagada') + ' ' + cn('cerrado', 'cerrado') + '</td></tr>';
     });
     if (!lista.length) h += '<tr><td>Todav\u00eda no hay noches cerradas.</td></tr>';
     h += '</table>';
