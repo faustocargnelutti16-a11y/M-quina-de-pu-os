@@ -2083,6 +2083,27 @@ app.get('/admin', function (req, res) {
 '<h2 class="titulo">M\u00e1quina</h2>' +
 '<div class="datos">' +
 '\u00daltima se\u00f1al \u00b7 <b>' + (segDesdePoll < 0 ? 'nunca' : 'hace ' + segDesdePoll + ' s') + '</b><br>' +
+/* EN QUE RED ESTA Y CON CUANTA SENAL, en el panel que se mira todos los
+   dias. El dato ya llegaba en cada consulta del Shelly y se guardaba, pero
+   habia que entrar a /metricas para verlo: en la practica, nunca. Y es el
+   numero que explica la mitad de los cortes, asi que va donde se mira.
+   La senal en dBm no le dice nada a nadie; al lado va en castellano. */
+(function () {
+  if (!redShelly) return 'Red wifi \u00b7 <b>sin dato todav\u00eda</b><br>';
+  const n = parseInt(senalShelly, 10);
+  let txt = 'sin medir', col = '#8A8A96';
+  if (!isNaN(n)) {
+    if (n >= -60)      { txt = 'buena';     col = '#7BD88F'; }
+    else if (n >= -67) { txt = 'justa';     col = '#7BD88F'; }
+    else if (n >= -75) { txt = 'pobre';     col = '#ffd166'; }
+    else               { txt = 'muy pobre'; col = '#ff9a9c'; }
+  }
+  return 'Red wifi \u00b7 <b>' + redShelly + '</b>' +
+    (redDesde ? ' <span style="opacity:.6">desde ' + horaCorta(redDesde) + '</span>' : '') + '<br>' +
+    'Se\u00f1al \u00b7 <b style="color:' + col + '">' + (isNaN(n) ? '\u2014' : n + ' dBm \u00b7 ' + txt) + '</b>' +
+    (!isNaN(n) && n < -70 ? ' <span style="color:#ff9a9c">(sin margen: con el bar lleno se corta)</span>' : '') +
+    '<br>';
+})() +
 'Prendida hace \u00b7 <b>' + (haceCuanto(uptimeShelly) ||
   '<span style="color:#ff9a9c">sin dato \u2014 script viejo en el Shelly</span>') + '</b><br>' +
 'Encendida desde \u00b7 <b>' + (ultimoArranqueShelly ? new Date(ultimoArranqueShelly).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }) : 'sin dato') + '</b><br>' +
