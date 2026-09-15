@@ -1732,6 +1732,29 @@ module.exports = function montarPinas(app, ctx) {
       return mejorPorPersona(pinas.filter(function (p) {
         return visible(p) && p.noche === hoy;
       })).length;
+    },
+
+    // POR QUE EL HISTORICO PUEDE ESTAR VACIO.
+    // El totem muestra en el historico solo golpes REALES y VISIBLES: las
+    // pinas de prueba no entran (si no, el record de la casa seria un numero
+    // inventado) y las que se ocultaron desde el editor del ranking tampoco.
+    // Si el historico aparece en cero, desde afuera parece un bug de la
+    // pantalla y no lo es: son estos numeros. Aca estan, sin adivinar.
+    censoPinas: function () {
+      let total = 0, prueba = 0, ocultas = 0, reales = 0, personas = 0;
+      const vistos = {};
+      pinas.forEach(function (p) {
+        total++;
+        if (p.prueba) prueba++;
+        if (p.oculta) ocultas++;
+        if (visible(p) && !p.prueba) {
+          reales++;
+          const k = clavePersona(p.apodo);
+          if (k && !vistos[k]) { vistos[k] = 1; personas++; }
+        }
+      });
+      return { total: total, prueba: prueba, ocultas: ocultas,
+               reales: reales, personas: personas };
     }
   };
 };
