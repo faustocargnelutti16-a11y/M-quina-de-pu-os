@@ -2176,6 +2176,37 @@ app.get('/admin', function (req, res) {
     '</div>';
 })() +
 
+/* DE DONDE SALE EL RANKING. El totem muestra en el HISTORICO solo golpes
+   reales y visibles; las pinas de prueba quedan afuera a proposito y las que
+   se ocultaron desde el editor tambien. Cuando el historico aparece vacio
+   parece un bug de la pantalla y casi nunca lo es: son estos numeros. */
+(function () {
+  if (!PIN || !PIN.censoPinas) return '';
+  let c;
+  try { c = PIN.censoPinas(); } catch (e) { return ''; }
+  const hay = c.reales > 0;
+  return '<div class="seccion">' +
+    '<h2 class="titulo">Pi\u00f1as guardadas</h2>' +
+    '<div class="datos">' +
+    'Cuentan para el r\u00e9cord y el hist\u00f3rico \u00b7 <b style="color:' +
+      (hay ? '#7BD88F' : '#ff9a9c') + '">' + c.reales + '</b>' +
+      (hay ? ' (' + c.personas + ' persona' + (c.personas === 1 ? '' : 's') + ')' : '') + '<br>' +
+    'De prueba \u00b7 <b>' + c.prueba + '</b><br>' +
+    'Ocultas desde el editor \u00b7 <b>' + c.ocultas + '</b><br>' +
+    'Total en el disco \u00b7 <b>' + c.total + '</b>' +
+    '</div>' +
+    '<p class="lectura tenue" style="margin-top:8px">' +
+    (hay
+      ? 'El hist\u00f3rico del t\u00f3tem muestra esas ' + c.reales + '. Las de prueba no entran nunca: ' +
+        'si entraran, el r\u00e9cord de la casa ser\u00eda un puntaje que no peg\u00f3 nadie.'
+      : '<b>El hist\u00f3rico est\u00e1 vac\u00edo y por eso el t\u00f3tem no muestra esa pesta\u00f1a.</b> ' +
+        'No es un error de la pantalla: no hay ninguna pi\u00f1a real y visible guardada. ' +
+        'O todas las que hay son de prueba, o se ocultaron desde el editor del ranking. ' +
+        'Las ocultas se vuelven a mostrar desde Fotos; la pesta\u00f1a HIST\u00d3RICO vuelve sola ' +
+        'apenas haya una.') +
+    '</p></div>';
+})() +
+
 '<div class="seccion">' +
 '<h2 class="titulo">Ver m\u00e1s</h2>' +
 '<div class="botones">' +
