@@ -2153,30 +2153,17 @@ setTimeout(function(){ try{ armarRueda(); }catch(e){} }, 4000);
     try{const p=pedir.call(el); if(p&&p.catch)p.catch(function(){});}catch(e){}
   }
 
-  /* EL CARTEL ES EL AVISO DE QUE FALTA LA PANTALLA COMPLETA.
-     Hubo dos versiones y las dos estaban a medias:
-       · La vieja solo escondia el cartel si la pantalla completa entraba de
-         verdad. En la TV andaba perfecto -tocabas OK, entraba, y de paso se
-         iba la barra del navegador- pero en cualquier navegador que la
-         rechaza el cartel quedaba puesto para siempre tapando el totem.
-       · La de anoche lo escondia siempre al primer toque. Arreglo la compu y
-         rompio la TV: el cartel se iba igual, el empleado creia que estaba
-         listo, y quedaba la barra de Silk comiendose un pedazo de pantalla.
-     Esta hace las dos cosas: mientras la pantalla completa exista y no haya
-     entrado, el cartel se queda -que es la unica senal visible de que
-     todavia falta algo- pero con un vencimiento de RENDICION_MS. Pasado eso
-     se va solo y no vuelve a molestar, asi que tampoco puede quedar
-     atrapado. */
-  const RENDICION_MS=2500;
-  let gesto=0;
-
+  /* ═══ NO TOCAR ESTE BLOQUE ═══
+     Esto es EXACTAMENTE el codigo que Fausto dejo andando a mano en la Fire
+     TV: OK del control -> entra pantalla completa, se va la barra de Silk, y
+     el cartel se va solo. Ya se rompio dos veces por reescribirlo "mejor".
+     No se reordena, no se refactoriza, no se cambia un setTimeout por otro.
+     Si alguna vez hay que tocarlo, se prueba ANTES en la Fire TV de verdad,
+     no en un navegador de escritorio: Silk se comporta distinto y ninguna
+     prueba de aca lo reproduce. */
   function empezar(){
-    /* Un OK del control remoto dispara keydown Y click. Si los dos llegan,
-       se pide pantalla completa dos veces seguidas dentro del mismo gesto y
-       el segundo pedido puede cancelar al primero. Se toma uno solo. */
-    if(Date.now()-gesto<500)return;
-    gesto=Date.now();
-
+    if(pidiendo)return;
+    pidiendo=true;
     /* Sonido y video se destraban igual: no molestan y si el gesto era de
        verdad, quedan listos. */
     const v=document.getElementById('despierto');
@@ -2184,41 +2171,28 @@ setTimeout(function(){ try{ armarRueda(); }catch(e){} }, 4000);
       if(p&&p.catch)p.catch(()=>{v.muted=true;v.play().catch(()=>{});});}catch(e){}}
     if(navigator.wakeLock){try{navigator.wakeLock.request('screen');}catch(e){}}
     try{ac();sonidoPrueba();}catch(e){}
-
-    const el=document.documentElement;
-    const hayFull=el.requestFullscreen||el.webkitRequestFullscreen||
-                  el.mozRequestFullScreen||el.msRequestFullscreen;
-    /* Sin API de pantalla completa no tiene sentido dejar el cartel: no hay
-       nada que esperar. */
-    if(!hayFull){ esconder(); return; }
-
     pedirPantallaCompleta();
-    /* Se le da un momento a que entre. Si entro, el cartel se va porque ya
-       esta todo listo; si no entro, se va igual para no quedar trabado, pero
-       recien despues de haberle dado la chance. */
-    setTimeout(function(){ esconder(); }, enPantallaCompleta()?120:RENDICION_MS);
+    setTimeout(esconder,2500);
+    document.addEventListener('fullscreenchange',esconder);
+    document.addEventListener('webkitfullscreenchange',esconder);
+    setTimeout(function(){pidiendo=false;},300);
   }
 
   /* Cualquier tecla y cualquier toque, en cualquier parte: lo unico que hace
      falta es un gesto humano, no uno en particular. Se ignora el primer
      segundo, porque ahi el navegador a veces dispara eventos por su cuenta y
      esos no cuentan como gesto. */
+  let ultimoIntento=0;
   ['click','pointerdown','touchstart','keydown'].forEach(function(ev){
     document.addEventListener(ev,function(){
       if(Date.now()-arranco<1200)return;
       if(capa.style.display!=='none'){ empezar(); return; }
       /* El cartel ya no esta: cada toque sigue reintentando la pantalla
          completa por las dudas, callado. Si ya esta, no hace nada. */
-      if(Date.now()-gesto<2000)return;
-      gesto=Date.now();
+      if(Date.now()-ultimoIntento<2000)return;
+      ultimoIntento=Date.now();
       pedirPantallaCompleta();
     });
-  });
-
-  /* Si la pantalla completa entra sola en cualquier momento -por ejemplo en
-     el reintento silencioso- el cartel sobra. */
-  ['fullscreenchange','webkitfullscreenchange'].forEach(function(ev){
-    document.addEventListener(ev,function(){ if(enPantallaCompleta())esconder(); });
   });
 
   /* Si el navegador SUELTA una pantalla completa que ya habia entrado (pasa
