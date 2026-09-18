@@ -264,29 +264,6 @@ function guardarTodo() {
 /* La cola de fichas vivia SOLO en memoria: si el server se reiniciaba (un
    deploy, un reinicio de Railway, un cierre inesperado), las fichas que
    alguien ya habia PAGADO y que estaban esperando a que la maquina volviera
-   se perdian sin dejar rastro. Cobrado y no entregado. Ahora se guarda en
-   disco y se recupera al arrancar. */
-const F_COLA = path.join(DATA_DIR, 'cola.json');
-let pendingActivation = 0;
-function guardarCola() {
-  if (!persistenciaOk) return;
-  try { escribirAtomico(F_COLA, JSON.stringify({ n: pendingActivation, ts: Date.now() })); } catch (e) {}
-}
-function setCola(n) {
-  const antes = pendingActivation;
-  pendingActivation = Math.max(0, n);
-  if (pendingActivation !== antes) guardarCola();
-}
-let entregaEnVuelo = null;
-let cajas = [];
-let bloqueado = false;
-let motivoBloqueo = '';
-let historialFichas = [];
-let eventos = leerJSON(F_LOG, []);
-const eventosRecuperados = eventos.length;
-let ventas = leerJSON(F_VENTAS, []);
-let ultimoGratis = 0;
-let ultimoPoll = 0;
 let pagosProcesados = leerJSON(F_PAGOS, {});
 caidas = leerJSON(F_ENCENDIDOS, []);
 (function () {
