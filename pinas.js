@@ -433,7 +433,8 @@ module.exports = function montarPinas(app, ctx) {
       pantallas: vivos,
       ultimo: visto.ultimo || 0,
       desde: prendido ? (visto.desde || 0) : 0,
-      haceMs: visto.ultimo ? (ahora - visto.ultimo) : null
+      haceMs: visto.ultimo ? (ahora - visto.ultimo) : null,
+      version: visto.version || null
     };
   }
 
@@ -451,7 +452,17 @@ module.exports = function montarPinas(app, ctx) {
     // que la tele esta prendida justo cuando la estas mirando por telefono.
     const quien = String((req.query && req.query.quien) || '');
     res._esTotem = (quien === 'totem');
-    if (res._esTotem) anotarTotem(true);
+    // La tele dice que version de totem.html esta corriendo. Sirve para
+    // saber desde el panel si ya tomo el archivo que subiste o sigue con
+    // uno viejo, sin tener que ir hasta el bar a mirar.
+    if (res._esTotem) {
+      // Se limpia a mano: esto despues se pinta en el panel y viene de la
+      // query, asi que solo pasan letras, numeros y guiones.
+      const ver = String((req.query && req.query.v) || '')
+                    .slice(0, 20).replace(/[^0-9A-Za-z.\-]/g, '');
+      if (ver) { visto.version = ver; visto.versionDesde = Date.now(); }
+      anotarTotem(true);
+    }
     clientes.add(res);
     req.on('close', function () { clientes.delete(res); });
   });
@@ -1381,6 +1392,24 @@ module.exports = function montarPinas(app, ctx) {
     });
   });
 
+  /* RECARGAR LA TELE A DISTANCIA.
+     Este fue el agujero mas caro de todos y no se veia: cuando se sube un
+     archivo nuevo, Railway lo publica al toque, pero la Fire TV sigue
+     corriendo el codigo que cargo la ultima vez que alguien la abrio. O sea
+     que se podia arreglar un problema, subirlo, y que la pantalla del bar
+     siguiera mostrando la version rota durante DIAS. Asi se pierde el
+     tiempo dos veces: una arreglando algo que ya estaba arreglado, y otra
+     discutiendo si el arreglo servia.
+     Con esto se aprieta un boton desde el celular y la tele se recarga
+     sola. Va con marca de tiempo en la direccion para que el navegador no
+     conteste con la copia vieja que tiene guardada. */
+  app.post('/api/recargar', function (req, res) {
+    if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
+    emitir('recargar', { t: Date.now() });
+    log('TOTEM', 'se mando a recargar la pantalla (' + totemesConectados() + ' conectadas)');
+    res.json({ ok: true, pantallas: totemesConectados() });
+  });
+
   app.post('/api/probar/llenar', function (req, res) {
     if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
     const b = req.body || {};
@@ -1713,6 +1742,20 @@ module.exports = function montarPinas(app, ctx) {
   app.get('/m',     servir('carga.html'));   // el QR de la maquina apunta aca
   app.get('/totem', servir('totem.html'));   // lo que abre el TV Box
 
+  /* RECARGAR LA TELE DESDE EL CELULAR.
+     Una pagina abierta no se entera de que subiste un archivo nuevo: la Fire
+     TV sigue mostrando el que cargo la ultima vez que alguien la abrio. Eso
+     hizo que mas de un arreglo pareciera no funcionar cuando en realidad la
+     tele nunca lo habia visto. Con esto se recarga sola desde el panel. */
+  app.get('/api/totem/recargar', function (req, res) {
+    if (!claveOk(req)) return res.status(401).send('clave');
+    const cuantas = totemesConectados();
+    emitir('recargar', { t: Date.now() });
+    log('TOTEM', 'recarga pedida desde el panel (' + cuantas + ' pantalla(s))');
+    const c = String(req.query.clave || '');
+    res.redirect('/admin' + (c ? ('?clave=' + encodeURIComponent(c)) : ''));
+  });
+
   const faltan = ['carga.html', 'totem.html'].filter(function (n) { return !buscarWeb(n); });
   if (faltan.length) {
     log('PI\u00d1AS', 'OJO: faltan las paginas ' + faltan.join(' y ') +
@@ -1758,3 +1801,5 @@ module.exports = function montarPinas(app, ctx) {
     }
   };
 };
+
+    
