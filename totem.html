@@ -5,17 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>BeerPunch · Tótem</title>
-<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Anton&family=Oswald:wght@400;500;600;700&family=Grand+Hotel&family=Playfair+Display:ital,wght@1,600;1,700&display=swap" rel="stylesheet">
+<!-- LAS FUENTES NO PUEDEN TRABAR EL ARRANQUE.
+     Esto era un <link> comun: el navegador no pintaba NADA hasta que Google
+     contestaba. En la Fire TV del bar eso son segundos de pantalla negra
+     cada vez que arranca, y en China -donde el proveedor va a probar la
+     placa- Google esta bloqueado y la pagina se quedaba esperando un
+     timeout. Ahora las dos hojas entran como media="print" (o sea, no
+     bloquean) y se activan solas cuando llegan. Si no llegan, se ven las
+     fuentes de respaldo y el totem funciona igual.
+     La segunda direccion es la de Google para China: la misma tipografia,
+     servida desde un dominio que alla si responde. Fuera de China tambien
+     resuelve, asi que no hay que tocar nada para la prueba. -->
+<link rel="stylesheet" media="print" onload="this.media='all'"
+      href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Anton&family=Oswald:wght@400;500;600;700&family=Grand+Hotel&family=Playfair+Display:ital,wght@1,600;1,700&display=swap">
+<link rel="stylesheet" media="print" onload="this.media='all'"
+      href="https://fonts.googleapis.cn/css2?family=Archivo+Black&family=Anton&family=Oswald:wght@400;500;600;700&family=Grand+Hotel&family=Playfair+Display:ital,wght@1,600;1,700&display=swap">
 <style>
 :root{
   color-scheme:dark;
   --rojo:#D7252A; --led:#FF2A2A; --oro:#FFD518; --azul:#3D55B8;
   --rosa:#F1437B; --rosaC:#FF8FB1; --teal:#2DD4BF;
   --texto:#fff; --suave:#D9DEE7; --tenue:#98A1B0;
-  --negra:'Archivo Black',Impact,sans-serif;
-  --poster:'Anton','Arial Narrow',sans-serif;
-  --cuerpo:'Oswald',sans-serif;
-  --fem:'Playfair Display',Georgia,serif;
+  /* Los respaldos van hasta el final a proposito. Impact y Arial Narrow no
+     existen en Android -y el totem corre en una placa Android-, asi que si
+     Google no contesta la letra caia en la sans de sistema y el cartel se
+     desarmaba. Roboto Condensed y Noto vienen en cualquier Android. */
+  --negra:'Archivo Black',Impact,'Roboto Condensed','Noto Sans',Arial,sans-serif;
+  --poster:'Anton','Arial Narrow','Roboto Condensed','Noto Sans',Arial,sans-serif;
+  --cuerpo:'Oswald','Roboto Condensed','Noto Sans',Arial,sans-serif;
+  --fem:'Playfair Display',Georgia,'Noto Serif',serif;
   --borde:rgba(255,255,255,.09);
 }
 *{margin:0;padding:0;box-sizing:border-box}
@@ -346,6 +364,19 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
    Se activa con ?espejo=1 al final de la direccion. No cambia ningun dato:
    es exactamente la misma pantalla, con la misma conexion en vivo. */
 const ESPEJO = /[?&]espejo=1/.test(location.search);
+
+/* MODO DEMOSTRACION: agregarle ?demo=1 a la direccion.
+   Es la MISMA pagina, el mismo codigo y el mismo servidor: lo unico que
+   cambia es que el ranking se llena con nombres de muestra y cada tanto
+   entra un golpe inventado, para que se vea trabajando aunque esa noche no
+   haya nadie en el bar. Sirve para mostrarsela a un proveedor, a un
+   inversor o para probar una placa nueva.
+   Dos cuidados que tiene: no toca ni un dato del servidor -los nombres se
+   arman en la pantalla y no se guardan en ningun lado- y la conexion se
+   presenta como "demo", asi que el panel NO la cuenta como tele prendida.
+   Alguien probando esto del otro lado del mundo no te ensucia las metricas
+   del bar. */
+const DEMO = /[?&]demo=1/.test(location.search);
 
 const CFG = {
   API:'',                       // '' = mismo origen. Ej: 'https://beerpunch.onrender.com'
@@ -2071,12 +2102,15 @@ function conectar(){
        mira la máquina, esta conexión mira la pantalla. El espejo de /vivo
        se identifica aparte para que mirarlo desde el celular no haga creer
        que la tele está encendida. */
-    const quien='?quien='+(ESPEJO?'espejo':'totem');
+    const quien='?quien='+(DEMO?'demo':(ESPEJO?'espejo':'totem'));
     try{es=new EventSource((CFG.API||'')+'/api/stream'+quien);}catch(e){return reintentar();}
     es.onopen=()=>{intentos=0;S.conexion='vivo';};
-    es.addEventListener('estado',ev=>{try{aplicarEstado(JSON.parse(ev.data));}catch(e){}});
-    es.addEventListener('golpe', ev=>{try{llegaGolpe(JSON.parse(ev.data));}catch(e){}});
-    es.addEventListener('record',ev=>{try{llegaGolpe({...JSON.parse(ev.data),esRecord:true});}catch(e){}});
+    /* En demostracion la conexion se abre igual -asi se prueba de verdad que
+       el aparato la sostiene toda la noche- pero los datos reales del bar no
+       entran: la pantalla la maneja la demo. */
+    es.addEventListener('estado',ev=>{if(DEMO)return;try{aplicarEstado(JSON.parse(ev.data));}catch(e){}});
+    es.addEventListener('golpe', ev=>{if(DEMO)return;try{llegaGolpe(JSON.parse(ev.data));}catch(e){}});
+    es.addEventListener('record',ev=>{if(DEMO)return;try{llegaGolpe({...JSON.parse(ev.data),esRecord:true});}catch(e){}});
     es.addEventListener('ruleta',ev=>{try{llegaRuleta(JSON.parse(ev.data));}catch(e){}});
     es.addEventListener('rey',   ev=>{try{const d=JSON.parse(ev.data);
       S.rey={nombre:d.nombre,score:d.score,premio:d.premio,entregado:false,ts:Date.now()};
@@ -2111,18 +2145,64 @@ try{
      cierre) esa cuenta todavia daba menos de 10h y se seguia mostrando el
      ranking de la noche anterior como si fuera el de esta noche. Ahora se
      compara la noche exacta: si cambio la noche, el cache no sirve. */
-  if(c&&c.e&&c.noche===claveNocheLocal()&&(Date.now()-c.ts)<10*3600e3) aplicarEstado(c.e,true);
+  if(!DEMO&&c&&c.e&&c.noche===claveNocheLocal()&&(Date.now()-c.ts)<10*3600e3) aplicarEstado(c.e,true);
 }catch(x){}
-fetch((CFG.API||'')+'/api/estado').then(r=>r.json()).then(function(e){aplicarEstado(e);}).catch(()=>{});
+if(!DEMO)fetch((CFG.API||'')+'/api/estado').then(r=>r.json()).then(function(e){aplicarEstado(e);}).catch(()=>{});
 conectar();
 
 /* ────────── primer pintado ────────── */
 pintarTabs(); pintarRecord(); pintarRanking(); pintarCard(); pintarQR(); pintarTicker();
 window.addEventListener('resize',()=>{pintarQR();});
 
+/* Las fuentes ya no bloquean el arranque, asi que el primer pintado pasa con
+   la letra de respaldo y las buenas entran unos instantes despues. Cada
+   cartel se mide para entrar en su caja, y con otra letra mide otra cosa: si
+   no se vuelve a pintar, quedan nombres cortados. Esto lo corrige solo. */
+if(document.fonts&&document.fonts.ready){
+  document.fonts.ready.then(function(){
+    try{pintarTabs();pintarRecord();pintarRanking();pintarCard();pintarQR();pintarTicker();}catch(e){}
+  }).catch(function(){});
+}
+
 /* Se deja lista de entrada, cuando no hay nadie mirando, asi el primer giro
    de la noche entra igual de rapido que los demas. */
 setTimeout(function(){ try{ armarRueda(); }catch(e){} }, 4000);
+
+/* ────────── la demostracion ────────── */
+/* Una noche buena del Beerlin, inventada. Los nombres son de fantasia a
+   proposito: esta pantalla se la mandamos a gente de afuera y no tiene por
+   que ver quien vino al bar. Los puntajes estan armados como los de verdad
+   -diferencias chicas arriba, mas grandes abajo- para que la tabla se lea
+   como una pelea y no como una lista. */
+function arrancarDemo(){
+  const H=[['EL RUSO',812,''],['TATE',794,'@tate.mdz'],['LA COLO',771,''],
+           ['NAHU',744,'@nahu'],['EL CHINO',718,''],['PIPA',691,'@pipa.k'],
+           ['MECHI',673,''],['BRUNO',652,''],['TOTI',634,'@toti'],['LU',611,'']];
+  const F=[['LA COLO',771,''],['MECHI',673,''],['LU',611,''],['SOFI',588,'@sofi'],
+           ['AGUS',559,'']];
+  const arm=function(t){return t.map(function(x,i){
+    return {id:'d'+i+x[0],nombre:x[0],score:x[1],ig:x[2]};});};
+  const estado={
+    noche:arm(H), mujeres:arm(F), historico:arm(H.slice(0,8)),
+    record:{score:947,nombre:'NARIGON'},
+    pinas:37, rey:null, reina:null, ts:Date.now()
+  };
+  aplicarEstado(estado);
+  /* Cada tanto entra un golpe: es lo que hace que la pantalla se vea VIVA y
+     lo que de verdad exige al aparato -animacion, sonido y repintado todo
+     junto-. Si una placa va a tironear, tironea aca. */
+  const NOM=['EL RUSO','TATE','LA COLO','NAHU','EL CHINO','PIPA','MECHI','BRUNO'];
+  let n=0;
+  setInterval(function(){
+    if(S.ocupado||S.packsAbierto)return;
+    n++;
+    const nombre=NOM[n%NOM.length];
+    const score=520+Math.floor(Math.random()*330);
+    try{ llegaGolpe({id:'g'+n,nombre:nombre,apodo:nombre,score:score,
+                     ig:'',sexo:n%3===0?'F':'M',ts:Date.now()}); }catch(e){}
+  },21000);
+}
+if(DEMO) setTimeout(arrancarDemo,600);
 
 /* ────────── pantalla de arranque: pantalla completa + gesto inicial ──────────
    La API de pantalla completa no se puede pedir sola al cargar (los
