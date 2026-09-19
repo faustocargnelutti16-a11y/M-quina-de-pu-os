@@ -1801,5 +1801,3 @@ module.exports = function montarPinas(app, ctx) {
     }
   };
 };
-
-    
