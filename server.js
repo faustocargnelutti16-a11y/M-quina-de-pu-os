@@ -2235,6 +2235,19 @@ app.get('/admin', function (req, res) {
     '</p></div>';
 })() +
 
+/* LOS RANKINGS, EDITABLES. Noche, mujeres e historico: sacar gente,
+   cambiar nombre, puntaje e Instagram, y agregar a mano. El editor vive en
+   su propia pagina (/rankings) porque este panel se recarga solo cada 30
+   segundos y te borraria una edicion a mitad de camino. */
+'<div class="seccion">' +
+'<h2 class="titulo">Rankings del t\u00f3tem</h2>' +
+'<p class="lectura" style="margin:0 0 10px">Noche, Mujeres e Hist\u00f3rico: sacar gente, cambiar ' +
+'nombres, puntajes e Instagram, pasar a alguien de una tabla a otra y agregar a mano. ' +
+'Lo que cambies se ve en la tele al toque.</p>' +
+'<div class="botones">' +
+'<a class="b" href="/rankings' + c + '">Editar rankings</a>' +
+'</div></div>' +
+
 '<div class="seccion">' +
 '<h2 class="titulo">Ver m\u00e1s</h2>' +
 '<div class="botones">' +
