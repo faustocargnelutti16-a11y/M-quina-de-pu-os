@@ -642,8 +642,16 @@ module.exports = function montarPinas(app, ctx) {
     pinas.push(pina);
 
     // Limpieza: no guardamos la historia entera para siempre.
+    // PERO el historico si. Antes esta limpieza borraba todo lo de mas de
+    // 120 dias sin mirar que era: el record de la casa, a los cuatro meses,
+    // desaparecia solo, y la tabla "de la historia del Beerlin" olvidaba a
+    // todos los que la habian armado. Se salvan los golpes que estan en el
+    // historico y los cargados a mano desde el panel.
     const limite = ahora - DIAS_QUE_GUARDAMOS * 24 * 3600e3;
-    pinas = pinas.filter(function (p) { return p.ts > limite; });
+    const salvar = {};
+    mejorPorPersona(pinas.filter(function (p) { return visible(p) && !p.prueba; }), TOP)
+      .forEach(function (x) { salvar[x.id] = 1; });
+    pinas = pinas.filter(function (p) { return p.ts > limite || salvar[p.id] || p.manual; });
 
     // ===== LA RULETA LA GIRA EL SERVIDOR =====
     // El celular NO decide nada: manda su pina, el server sortea, y le
@@ -1390,6 +1398,290 @@ module.exports = function montarPinas(app, ctx) {
       // cuantos nombres quedan sin usar, para avisar antes de que "+1" no haga nada
       libresM: NOMBRES_M.length, libresF: NOMBRES_F.length
     });
+  });
+
+  /* ===== EL HISTORICO, EDITABLE DESDE EL PANEL =====
+     El editor de /vivo trabaja sobre la noche de HOY: "sacar" a alguien
+     solo escondia sus pinas de esta noche. Si esa persona estaba en el
+     historico por un golpe de OTRA noche, seguia ahi -o peor, desaparecia
+     su golpe de hoy y volvia a aparecer con uno viejo mas bajo, y la tabla
+     se reacomodaba con otra gente sin que se entendiera por que-.
+     Esto trabaja sobre TODAS las noches. Sacar a alguien del historico lo
+     saca de verdad, y se puede devolver: las pinas reales no se borran,
+     se esconden. Las de prueba si se borran, porque no son de nadie. */
+  function pinasDePersona(apodo) {
+    const k = clavePersona(apodo);
+    return pinas.filter(function (p) { return clavePersona(p.apodo) === k; });
+  }
+
+  app.get('/api/historico/lista', function (req, res) {
+    if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
+    const reales = pinas.filter(function (p) { return visible(p) && !p.prueba; });
+    // se mandan diez: los cinco que se ven y los cinco que suben si sacas a alguien
+    const top = mejorPorPersona(reales, 10).map(function (x) {
+      const suyas = pinasDePersona(x.nombre);
+      const noches = {};
+      suyas.forEach(function (p) { noches[p.noche] = 1; });
+      return { nombre: x.nombre, score: x.score, ig: x.ig,
+               noches: Object.keys(noches).length };
+    });
+    const enTop = {};
+    top.forEach(function (x) { enTop[clavePersona(x.nombre)] = 1; });
+    // los escondidos, para poder devolverlos (solo reales: las de prueba ya no existen)
+    const esc = {};
+    pinas.forEach(function (p) {
+      if (p.prueba || !p.oculta) return;
+      const k = clavePersona(p.apodo);
+      if (enTop[k]) return;
+      if (!esc[k] || esc[k].score < p.score) esc[k] = { nombre: p.apodo, score: p.score };
+    });
+    const ocultos = Object.keys(esc).map(function (k) { return esc[k]; })
+      .sort(function (a, b) { return b.score - a.score; });
+    res.json({ historico: top, ocultos: ocultos, enPantalla: 5 });
+  });
+
+  app.post('/api/historico/quitar', function (req, res) {
+    if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
+    const apodo = limpiar((req.body || {}).apodo, 14);
+    if (!apodo) return res.status(400).json({ error: 'falta el nombre' });
+    const suyas = pinasDePersona(apodo);
+    if (!suyas.length) return res.status(404).json({ error: 'no encontre a ' + apodo });
+    // las de prueba se borran; las reales se esconden (se pueden devolver)
+    const idsPrueba = {};
+    let ocultas = 0;
+    suyas.forEach(function (p) {
+      if (p.prueba) idsPrueba[p.id] = 1;
+      else if (!p.oculta) { p.oculta = true; ocultas++; }
+    });
+    const antes = pinas.length;
+    pinas = pinas.filter(function (p) { return !idsPrueba[p.id]; });
+    premios = premios.filter(function (x) { return !(x.pina && idsPrueba[x.pina]); });
+    const borradas = antes - pinas.length;
+    guardar();
+    emitir('estado', estado());
+    log('HISTORICO', 'sacado: ' + apodo + ' (' + ocultas + ' reales escondidas, ' +
+        borradas + ' de prueba borradas, de todas las noches)');
+    res.json({ ok: true, ocultas: ocultas, borradas: borradas });
+  });
+
+  app.post('/api/historico/mostrar', function (req, res) {
+    if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
+    const apodo = limpiar((req.body || {}).apodo, 14);
+    if (!apodo) return res.status(400).json({ error: 'falta el nombre' });
+    let vueltas = 0;
+    pinasDePersona(apodo).forEach(function (p) {
+      if (!p.prueba && p.oculta) { p.oculta = false; vueltas++; }
+    });
+    guardar();
+    emitir('estado', estado());
+    log('HISTORICO', 'devuelto: ' + apodo + ' (' + vueltas + ' pi\u00f1as)');
+    res.json({ ok: true, vueltas: vueltas });
+  });
+
+  /* ===== EDITOR DE RANKINGS: NOCHE, MUJERES E HISTORICO =====
+     Una sola herramienta para las tres tablas: sacar gente, cambiar nombre,
+     puntaje e Instagram, pasar a alguien entre hombres y mujeres, y agregar
+     a mano.
+     Cada tabla edita lo que muestra: NOCHE y MUJERES trabajan sobre las
+     pinas de hoy; HISTORICO sobre todas las noches. Asi, renombrar a alguien
+     en el historico no lo parte en dos personas (una con el nombre viejo en
+     otra noche), y arreglar un nombre de hoy no toca a otro homonimo de
+     hace un mes.
+     Nada se edita a ciegas: cada pina tocada guarda su valor original
+     (scoreOriginal / apodoOriginal) y queda marcada. Son los numeros que
+     despues se le muestran a un inversor: tiene que poder saberse que se
+     corrigio a mano y que no. */
+  const TABLAS = { noche: 1, mujeres: 1, historico: 1 };
+
+  function alcanceDe(tabla) {
+    const hoy = nocheHoy();
+    if (tabla === 'historico') return function () { return true; };
+    if (tabla === 'mujeres') return function (p) { return p.noche === hoy && p.sexo === 'F'; };
+    return function (p) { return p.noche === hoy; };
+  }
+  function filasDe(tabla) {
+    const dentro = alcanceDe(tabla);
+    const base = pinas.filter(function (p) {
+      return visible(p) && dentro(p) && (tabla !== 'historico' || !p.prueba);
+    });
+    return mejorPorPersona(base, TOP).map(function (x) {
+      const p = pinas.filter(function (q) { return q.id === x.id; })[0] || {};
+      const k = clavePersona(x.nombre);
+      const noches = {};
+      pinas.forEach(function (q) { if (clavePersona(q.apodo) === k && dentro(q)) noches[q.noche] = 1; });
+      return { id: x.id, nombre: x.nombre, ig: x.ig, score: x.score, sexo: p.sexo || 'M',
+               prueba: !!p.prueba, manual: !!p.manual,
+               editada: !!(p.scoreOriginal != null || p.apodoOriginal != null),
+               noches: Object.keys(noches).length };
+    });
+  }
+  // todas las pinas de esa persona DENTRO de la tabla que se esta editando
+  function delMismo(tabla, pina) {
+    const dentro = alcanceDe(tabla), k = clavePersona(pina.apodo);
+    return pinas.filter(function (q) { return dentro(q) && clavePersona(q.apodo) === k; });
+  }
+  function tablaOk(req) {
+    const t = String((req.body && req.body.tabla) || (req.query && req.query.tabla) || '');
+    return TABLAS[t] ? t : null;
+  }
+  function puntajeOk(v) {
+    const n = Math.round(Number(v));
+    return (isFinite(n) && n >= 1 && n <= 999) ? n : null;
+  }
+  function cambio(res, texto, extra) {
+    guardar();
+    emitir('estado', estado());
+    log('EDITOR', texto);
+    res.json(Object.assign({ ok: true }, extra || {}));
+  }
+
+  app.get('/api/ranking', function (req, res) {
+    if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
+    const tabla = tablaOk(req);
+    if (!tabla) return res.status(400).json({ error: 'tabla' });
+    // escondidos de verdad (no de prueba), de cualquier noche, para poder devolverlos
+    const visibles = {};
+    pinas.forEach(function (p) { if (visible(p)) visibles[clavePersona(p.apodo)] = 1; });
+    const esc = {};
+    pinas.forEach(function (p) {
+      if (p.prueba || !p.oculta) return;
+      const k = clavePersona(p.apodo);
+      if (visibles[k]) return;
+      if (!esc[k] || esc[k].score < p.score) esc[k] = { nombre: p.apodo, score: p.score };
+    });
+    res.json({
+      tabla: tabla, noche: nocheHoy(),
+      filas: filasDe(tabla),
+      enPantalla: tabla === 'historico' ? 5 : TOP,
+      ocultos: Object.keys(esc).map(function (k) { return esc[k]; })
+        .sort(function (a, b) { return b.score - a.score; })
+    });
+  });
+
+  app.post('/api/ranking/editar', function (req, res) {
+    if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
+    const tabla = tablaOk(req);
+    const b = req.body || {};
+    const p = pinas.filter(function (q) { return q.id === b.id; })[0];
+    if (!tabla || !p) return res.status(404).json({ error: 'no encontre esa fila' });
+    const cambios = [];
+    const todas = delMismo(tabla, p);
+    let fusion = false;
+
+    if (b.score != null && b.score !== '') {
+      const n = puntajeOk(b.score);
+      if (n == null) return res.status(400).json({ error: 'el puntaje va de 1 a 999' });
+      if (n !== p.score) {
+        if (p.scoreOriginal == null) p.scoreOriginal = p.score;
+        cambios.push('puntaje ' + p.score + ' -> ' + n);
+        p.score = n;
+      }
+    }
+    if (b.nombre != null) {
+      const nuevo = limpiar(b.nombre, 14);
+      if (!nuevo) return res.status(400).json({ error: 'el nombre no puede quedar vacio' });
+      if (nuevo !== p.apodo) {
+        // si ya habia otra persona con ese nombre en la tabla, quedan como una sola
+        const kn = clavePersona(nuevo), dentro = alcanceDe(tabla);
+        fusion = pinas.some(function (q) {
+          return dentro(q) && clavePersona(q.apodo) === kn && todas.indexOf(q) < 0;
+        });
+        cambios.push('nombre ' + p.apodo + ' -> ' + nuevo + (fusion ? ' (se junta con el que ya estaba)' : ''));
+        todas.forEach(function (q) {
+          if (q.apodoOriginal == null) q.apodoOriginal = q.apodo;
+          q.apodo = nuevo;
+        });
+      }
+    }
+    if (b.ig != null) {
+      const ig = limpiar(String(b.ig).replace(/^@+/, ''), 30);
+      if (ig !== (p.ig || '')) {
+        cambios.push('instagram -> ' + (ig ? '@' + ig : '(sin)'));
+        todas.forEach(function (q) { q.ig = ig; });
+      }
+    }
+    if (b.sexo === 'F' || b.sexo === 'M') {
+      if (b.sexo !== (p.sexo || 'M')) {
+        cambios.push(b.sexo === 'F' ? 'pasa a MUJERES' : 'sale de MUJERES');
+        todas.forEach(function (q) { q.sexo = b.sexo; });
+      }
+    }
+    if (!cambios.length) return res.json({ ok: true, sinCambios: true });
+    cambio(res, tabla + ' \u00b7 ' + p.apodo + ': ' + cambios.join(', '), { fusion: fusion });
+  });
+
+  app.post('/api/ranking/agregar', function (req, res) {
+    if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
+    const tabla = tablaOk(req);
+    const b = req.body || {};
+    if (!tabla) return res.status(400).json({ error: 'tabla' });
+    const nombre = limpiar(b.nombre, 14);
+    const n = puntajeOk(b.score);
+    if (!nombre) return res.status(400).json({ error: 'falta el nombre' });
+    if (n == null) return res.status(400).json({ error: 'el puntaje va de 1 a 999' });
+    const ahora = Date.now();
+    const sexo = tabla === 'mujeres' ? 'F' : (b.sexo === 'F' ? 'F' : 'M');
+    pinas.push({
+      id: 'm' + ahora.toString(36) + crypto.randomBytes(2).toString('hex'),
+      ts: ahora,
+      // lo del historico se guarda aparte de "hoy": si no, un record viejo
+      // cargado a mano apareceria tambien en el ranking de esta noche
+      noche: tabla === 'historico' ? 'historico' : nocheHoy(),
+      apodo: nombre, ig: limpiar(String(b.ig || '').replace(/^@+/, ''), 30),
+      sexo: sexo, score: n, foto: null, envio: null, disp: null, huella: null,
+      giro: false, gajo: null, aprobada: true, oculta: false,
+      ip: 'panel', prueba: false, manual: true
+    });
+    cambio(res, tabla + ' \u00b7 agregado a mano: ' + nombre + ' ' + n);
+  });
+
+  app.post('/api/ranking/quitar', function (req, res) {
+    if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
+    const tabla = tablaOk(req);
+    const b = req.body || {};
+    const p = pinas.filter(function (q) { return q.id === b.id; })[0];
+    if (!tabla || !p) return res.status(404).json({ error: 'no encontre esa fila' });
+    const todas = delMismo(tabla, p);
+    // las de prueba y las cargadas a mano se borran; las reales se esconden
+    const borrar = {};
+    let ocultas = 0;
+    todas.forEach(function (q) {
+      if (q.prueba || q.manual) borrar[q.id] = 1;
+      else if (!q.oculta) { q.oculta = true; ocultas++; }
+    });
+    const antes = pinas.length;
+    pinas = pinas.filter(function (q) { return !borrar[q.id]; });
+    premios = premios.filter(function (x) { return !(x.pina && borrar[x.pina]); });
+    cambio(res, tabla + ' \u00b7 sacado: ' + p.apodo + ' (' + ocultas + ' escondidas, ' +
+           (antes - pinas.length) + ' borradas)', { ocultas: ocultas, borradas: antes - pinas.length });
+  });
+
+  app.post('/api/ranking/devolver', function (req, res) {
+    if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
+    const nombre = limpiar((req.body || {}).nombre, 14);
+    const k = clavePersona(nombre);
+    let n = 0;
+    pinas.forEach(function (q) {
+      if (!q.prueba && q.oculta && clavePersona(q.apodo) === k) { q.oculta = false; n++; }
+    });
+    if (!n) return res.status(404).json({ error: 'no habia nada escondido de ' + nombre });
+    cambio(res, 'devuelto: ' + nombre + ' (' + n + ' pi\u00f1as)', { vueltas: n });
+  });
+
+  /* La pagina del editor. Va aparte del panel a proposito: el panel se
+     recarga solo cada 30 segundos, y eso te borraria lo que estas
+     escribiendo a mitad de una edicion. Esta se actualiza sola solo cuando
+     no estas editando nada. (El HTML esta guardado como texto escapado para
+     que el archivo sea ASCII puro y Railway no se caiga por una tilde.) */
+  const PAGINA_RANKINGS = "<!DOCTYPE html>\n<html lang=\"es\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>BPK \u00b7 Rankings</title>\n<style>\n:root{--fondo:#0B0B0F;--caja:#15151c;--borde:rgba(255,255,255,.08);--texto:#F2F2F5;--tenue:#8A8A96;\n  --oro:#FFD518;--rojo:#E23B3B;--verde:#7BD88F;--rosa:#F1437B}\n*{box-sizing:border-box}\nbody{margin:0;background:var(--fondo);color:var(--texto);font:15px/1.4 -apple-system,system-ui,Segoe UI,Roboto,sans-serif}\n.cab{position:sticky;top:0;z-index:5;background:var(--fondo);padding:14px 16px 10px;border-bottom:1px solid var(--borde)}\n.cab a{color:var(--tenue);text-decoration:none;font-size:14px}\nh1{font:400 26px/1.1 Impact,'Anton',sans-serif;letter-spacing:1px;margin:6px 0 10px}\n.tabs{display:flex;gap:6px}\n.tabs button{flex:1;padding:10px 4px;border-radius:10px;border:1px solid var(--borde);background:var(--caja);\n  color:var(--tenue);font-weight:700;font-size:14px}\n.tabs button.on{background:var(--oro);color:#111;border-color:var(--oro)}\n.tabs button.on.fem{background:var(--rosa);border-color:var(--rosa);color:#fff}\nmain{padding:12px 16px 40px}\n.ayuda{color:var(--tenue);font-size:13px;margin:4px 0 12px}\n.fila{background:var(--caja);border:1px solid var(--borde);border-radius:12px;padding:10px 12px;margin-bottom:8px}\n.fila.fuera{opacity:.55}\n.linea{display:flex;align-items:center;gap:10px}\n.pos{width:24px;font-weight:800;color:var(--tenue)}\n.pos.p1{color:var(--oro)}\n.nom{flex:1;min-width:0}\n.nom b{font-size:16px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.nom small{color:var(--tenue)}\n.chip{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:99px;margin:3px 4px 0 0;border:1px solid}\n.chip.prueba{color:#9aa4b8;border-color:#4a5263}\n.chip.mano{color:#7fc7ff;border-color:#2f5f86}\n.chip.edit{color:#ffcf6b;border-color:#7a6224}\n.pts{font:400 24px/1 Impact,'Anton',sans-serif;color:var(--oro);min-width:48px;text-align:right}\n.acc{display:flex;gap:6px;margin-top:8px}\nbutton.b{border:1px solid var(--borde);background:#1f1f28;color:var(--texto);border-radius:9px;padding:8px 12px;font-weight:700;font-size:14px}\nbutton.b.pri{background:var(--oro);color:#111;border-color:var(--oro)}\nbutton.b.pel{color:#ff9a9c;border-color:rgba(255,120,120,.35)}\n.form{display:grid;grid-template-columns:1fr 90px;gap:8px;margin-top:10px}\n.form .ancho{grid-column:1/-1}\ninput,select{width:100%;padding:10px;border-radius:9px;border:1px solid var(--borde);background:#0f0f15;color:var(--texto);font-size:16px}\nlabel{font-size:12px;color:var(--tenue);display:block;margin-bottom:3px}\n.corte{color:var(--tenue);font-size:12px;text-align:center;margin:10px 0}\nh2{font-size:13px;letter-spacing:1.5px;text-transform:uppercase;color:var(--tenue);margin:22px 0 8px}\n#estado{position:fixed;left:12px;right:12px;bottom:12px;padding:12px 14px;border-radius:12px;background:#222a22;\n  color:var(--verde);font-weight:700;display:none;z-index:9;box-shadow:0 6px 24px rgba(0,0,0,.5)}\n#estado.mal{background:#2a1f1f;color:#ff9a9c}\n.vacio{color:var(--tenue);padding:14px;text-align:center;border:1px dashed var(--borde);border-radius:12px}\n</style>\n</head>\n<body>\n<div class=\"cab\">\n  <a href=\"/admin__CLAVE_Q__\">&larr; Panel</a>\n  <h1>RANKINGS DEL T\u00d3TEM</h1>\n  <div class=\"tabs\">\n    <button data-t=\"noche\" class=\"on\">NOCHE</button>\n    <button data-t=\"mujeres\" class=\"fem\">MUJERES</button>\n    <button data-t=\"historico\">HIST\u00d3RICO</button>\n  </div>\n</div>\n<main>\n  <div class=\"ayuda\" id=\"ayuda\"></div>\n  <div id=\"lista\"></div>\n\n  <h2>Agregar a mano</h2>\n  <div class=\"fila\">\n    <div class=\"form\">\n      <div><label>Nombre</label><input id=\"nNom\" maxlength=\"14\" autocomplete=\"off\"></div>\n      <div><label>Puntaje</label><input id=\"nPts\" type=\"number\" inputmode=\"numeric\" min=\"1\" max=\"999\"></div>\n      <div id=\"nSexoCaja\"><label>Tabla</label><select id=\"nSexo\"><option value=\"M\">Hombre</option><option value=\"F\">Mujer</option></select></div>\n      <div><label>Instagram</label><input id=\"nIg\" placeholder=\"opcional\" autocomplete=\"off\"></div>\n      <div class=\"ancho\"><button class=\"b pri\" id=\"bAgregar\" style=\"width:100%\">Agregar</button></div>\n    </div>\n    <div class=\"ayuda\" id=\"ayudaAgregar\" style=\"margin:10px 0 0\"></div>\n  </div>\n\n  <div id=\"ocultosCaja\"></div>\n</main>\n<div id=\"estado\"></div>\n\n<script>\n(function(){\nvar CLAVE = '__CLAVE__';\nvar tabla = 'noche', datos = null, editando = null;\n\nfunction $(id){ return document.getElementById(id); }\nfunction esc(s){ return String(s == null ? '' : s).replace(/[&<>\"]/g, function(c){\n  return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]; }); }\nfunction aviso(txt, mal){\n  var e = $('estado'); e.textContent = txt; e.className = mal ? 'mal' : ''; e.style.display = 'block';\n  clearTimeout(aviso.t); aviso.t = setTimeout(function(){ e.style.display = 'none'; }, mal ? 5000 : 2600);\n}\nfunction api(ruta, cuerpo){\n  var op = cuerpo ? { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cuerpo) } : {};\n  var url = ruta + (CLAVE ? (ruta.indexOf('?') < 0 ? '?' : '&') + 'clave=' + CLAVE : '');\n  return fetch(url, op).then(function(r){\n    return r.json().then(function(j){ if(!r.ok) throw new Error(j && j.error || ('error ' + r.status)); return j; });\n  });\n}\n\nvar AYUDA = {\n  noche: 'La tabla de ESTA noche. Lo que cambies ac\u00e1 se ve en la tele al toque y cuenta para la birrita de las 3.',\n  mujeres: 'Las mujeres de ESTA noche. Para pasar a alguien de una tabla a la otra, editala y cambi\u00e1 \"Tabla\".',\n  historico: 'Todas las noches. Se ven los primeros 5 en la tele. Sacar esconde a esa persona de TODAS las noches (se puede devolver abajo).'\n};\n\nfunction cargar(){\n  api('/api/ranking?tabla=' + tabla)\n    .then(function(d){ datos = d; pintar(); })\n    .catch(function(e){ $('lista').innerHTML = '<div class=\"vacio\">No se pudo leer: ' + esc(e.message) + '</div>'; });\n}\n\nfunction pintar(){\n  $('ayuda').textContent = AYUDA[tabla];\n  $('nSexoCaja').style.display = (tabla === 'noche') ? '' : 'none';\n  $('ayudaAgregar').textContent = tabla === 'historico'\n    ? 'Para cargar r\u00e9cords viejos que la m\u00e1quina no guard\u00f3. No aparece en el ranking de hoy.'\n    : 'Cuenta como un golpe real de hoy: puede ganar la birrita.';\n  var L = $('lista'), h = '';\n  if(!datos.filas.length){ L.innerHTML = '<div class=\"vacio\">Vac\u00eda. No hay nadie en esta tabla.</div>'; pintarOcultos(); return; }\n  datos.filas.forEach(function(x, i){\n    var fuera = i >= datos.enPantalla;\n    if(i === datos.enPantalla) h += '<div class=\"corte\">\u2193 no se ven en la tele \u00b7 suben si sac\u00e1s a alguien de arriba</div>';\n    h += '<div class=\"fila' + (fuera ? ' fuera' : '') + '\" data-id=\"' + esc(x.id) + '\">' +\n      '<div class=\"linea\">' +\n        '<span class=\"pos' + (i === 0 ? ' p1' : '') + '\">' + (i + 1) + '</span>' +\n        '<span class=\"nom\"><b>' + esc(x.nombre) + '</b>' +\n          (x.ig ? '<small>@' + esc(x.ig) + '</small> ' : '') +\n          (x.noches > 1 ? '<small>\u00b7 ' + x.noches + ' noches</small>' : '') +\n          '<div>' +\n            (x.prueba ? '<span class=\"chip prueba\">de prueba</span>' : '') +\n            (x.manual ? '<span class=\"chip mano\">cargado a mano</span>' : '') +\n            (x.editada ? '<span class=\"chip edit\">editado</span>' : '') +\n          '</div>' +\n        '</span>' +\n        '<span class=\"pts\">' + x.score + '</span>' +\n      '</div>' +\n      (editando === x.id ? formEdicion(x) :\n        '<div class=\"acc\"><button class=\"b\" data-ed=\"' + esc(x.id) + '\">Editar</button>' +\n        '<button class=\"b pel\" data-sac=\"' + esc(x.id) + '\">Sacar</button></div>') +\n    '</div>';\n  });\n  L.innerHTML = h;\n  pintarOcultos();\n}\n\nfunction formEdicion(x){\n  var sexo = tabla !== 'historico'\n    ? '<div class=\"ancho\"><label>Tabla</label><select id=\"eSexo\">' +\n        '<option value=\"M\"' + (x.sexo !== 'F' ? ' selected' : '') + '>Hombre (NOCHE)</option>' +\n        '<option value=\"F\"' + (x.sexo === 'F' ? ' selected' : '') + '>Mujer (MUJERES)</option></select></div>'\n    : '';\n  return '<div class=\"form\">' +\n    '<div><label>Nombre</label><input id=\"eNom\" maxlength=\"14\" value=\"' + esc(x.nombre) + '\"></div>' +\n    '<div><label>Puntaje</label><input id=\"ePts\" type=\"number\" inputmode=\"numeric\" min=\"1\" max=\"999\" value=\"' + x.score + '\"></div>' +\n    '<div class=\"ancho\"><label>Instagram</label><input id=\"eIg\" value=\"' + esc(x.ig || '') + '\" placeholder=\"sin Instagram\"></div>' +\n    sexo +\n    '<div class=\"ancho\" style=\"display:flex;gap:8px\">' +\n      '<button class=\"b pri\" data-guardar=\"' + esc(x.id) + '\" style=\"flex:1\">Guardar</button>' +\n      '<button class=\"b\" data-cancelar=\"1\" style=\"flex:1\">Cancelar</button></div>' +\n  '</div>';\n}\n\nfunction pintarOcultos(){\n  var O = $('ocultosCaja');\n  if(!datos.ocultos || !datos.ocultos.length){ O.innerHTML = ''; return; }\n  var h = '<h2>Escondidos</h2><div class=\"ayuda\" style=\"margin-top:0\">No salen en ninguna tabla. Sus pi\u00f1as siguen guardadas.</div>';\n  datos.ocultos.forEach(function(x){\n    h += '<div class=\"fila\"><div class=\"linea\"><span class=\"nom\"><b>' + esc(x.nombre) + '</b></span>' +\n      '<span class=\"pts\">' + x.score + '</span></div>' +\n      '<div class=\"acc\"><button class=\"b\" data-dev=\"' + esc(x.nombre) + '\">Devolver</button></div></div>';\n  });\n  O.innerHTML = h;\n}\n\ndocument.querySelector('.tabs').addEventListener('click', function(e){\n  var b = e.target.closest('button'); if(!b) return;\n  tabla = b.getAttribute('data-t'); editando = null;\n  document.querySelectorAll('.tabs button').forEach(function(x){ x.classList.toggle('on', x === b); });\n  $('lista').innerHTML = '<div class=\"vacio\">Cargando\u2026</div>';\n  cargar();\n});\n\ndocument.body.addEventListener('click', function(e){\n  var b = e.target.closest('button'); if(!b) return;\n  var id;\n  if((id = b.getAttribute('data-ed'))){ editando = id; pintar(); var n = $('eNom'); if(n) n.focus(); return; }\n  if(b.getAttribute('data-cancelar')){ editando = null; pintar(); return; }\n  if((id = b.getAttribute('data-guardar'))){\n    var cuerpo = { tabla: tabla, id: id, nombre: $('eNom').value, score: $('ePts').value, ig: $('eIg').value };\n    if($('eSexo')) cuerpo.sexo = $('eSexo').value;\n    b.textContent = 'Guardando\u2026';\n    api('/api/ranking/editar', cuerpo).then(function(r){\n      editando = null;\n      aviso(r.sinCambios ? 'No hab\u00eda nada para cambiar' : (r.fusion ? 'Guardado \u00b7 se junt\u00f3 con el que ya ten\u00eda ese nombre' : 'Guardado \u00b7 ya se ve en la tele'));\n      cargar();\n    }).catch(function(err){ b.textContent = 'Guardar'; aviso(err.message, true); });\n    return;\n  }\n  if((id = b.getAttribute('data-sac'))){\n    var fila = datos.filas.filter(function(x){ return x.id === id; })[0];\n    var donde = tabla === 'historico' ? ' de TODAS las noches' : ' de esta noche';\n    if(!confirm('\u00bfSacar a ' + (fila ? fila.nombre : '') + donde + '?\\n\\nSi es real se esconde (se puede devolver). Si es de prueba o cargado a mano, se borra.')) return;\n    b.textContent = '\u2026';\n    api('/api/ranking/quitar', { tabla: tabla, id: id }).then(function(){ aviso('Sacado'); cargar(); })\n      .catch(function(err){ aviso(err.message, true); cargar(); });\n    return;\n  }\n  if((id = b.getAttribute('data-dev'))){\n    b.textContent = '\u2026';\n    api('/api/ranking/devolver', { nombre: id }).then(function(){ aviso('Devuelto'); cargar(); })\n      .catch(function(err){ aviso(err.message, true); cargar(); });\n    return;\n  }\n});\n\n$('bAgregar').addEventListener('click', function(){\n  var cuerpo = { tabla: tabla, nombre: $('nNom').value, score: $('nPts').value, ig: $('nIg').value, sexo: $('nSexo').value };\n  if(!cuerpo.nombre.trim()) return aviso('Falta el nombre', true);\n  api('/api/ranking/agregar', cuerpo).then(function(){\n    $('nNom').value = ''; $('nPts').value = ''; $('nIg').value = '';\n    aviso('Agregado \u00b7 ya se ve en la tele'); cargar();\n  }).catch(function(err){ aviso(err.message, true); });\n});\n\n/* Si entra un golpe mientras lo ten\u00e9s abierto, la tabla se actualiza sola.\n   Mientras est\u00e1s editando una fila, no: te borrar\u00eda lo que est\u00e1s escribiendo. */\nsetInterval(function(){ if(!editando && document.visibilityState === 'visible') cargar(); }, 20000);\ncargar();\n})();\n</script>\n</body>\n</html>\n";
+  app.get('/rankings', function (req, res) {
+    if (!claveOk(req)) return res.status(401).send('Falta la clave: entra desde el panel.');
+    const clave = String((req.query && req.query.clave) || '');
+    const enc = encodeURIComponent(clave);
+    res.set('Cache-Control', 'no-store');
+    res.type('text/html').send(PAGINA_RANKINGS
+      .replace('__CLAVE_Q__', clave ? '?clave=' + enc : '')
+      .replace('__CLAVE__', enc));
   });
 
   /* RECARGAR LA TELE A DISTANCIA.
