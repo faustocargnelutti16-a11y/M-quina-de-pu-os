@@ -87,7 +87,13 @@ html,body{height:100%;background:#04050a;overflow:hidden;font-family:var(--cuerp
   background:rgba(255,213,24,.09);color:var(--oro);font-weight:700;letter-spacing:1px;font-size:calc(1.95 * var(--u))}
 #panel.fem #premioEt{background:rgba(241,67,123,.12);color:var(--rosa);
   font-family:var(--fem);font-style:italic;letter-spacing:.3px;font-size:calc(2.3 * var(--u))}
-#cuenta{text-align:center;font-weight:700;letter-spacing:1.8px;font-size:calc(1.95 * var(--u));padding:.4% 0 .8%;color:#fff}
+/* Un solo renglon, siempre. Pasada la hora del premio dice "PREMIO ENTREGADO
+   - ARRANCA UNA NOCHE NUEVA" o "GANO FULANO - PASA POR LA CAJA", que son mas
+   largos que la cuenta regresiva: se partian en dos lineas, le robaban alto a
+   la tabla y la ultima fila quedaba cortada o encimada. Ahora la letra se
+   achica hasta que entre (ver pintarRanking) y nunca baja de renglon. */
+#cuenta{text-align:center;font-weight:700;letter-spacing:1.8px;font-size:calc(1.95 * var(--u));padding:.4% 0 .8%;color:#fff;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #cuenta b{color:var(--oro)}
 #cuenta.urge b{color:var(--led)}
 #filas{flex:1;display:flex;flex-direction:column;justify-content:space-evenly;min-height:0}
@@ -379,7 +385,15 @@ const VERSION = '2026-09-18';
 
 const CFG = {
   API:'',                       // '' = mismo origen. Ej: 'https://beerpunch.onrender.com'
-  ROTAR_90:!ESPEJO,             // true si el TV Box NO rota la salida de video
+  /* Se gira SOLO si la pantalla es apaisada. La Fire TV saca la imagen
+     acostada (1920x1080) y la tele esta parada, asi que ahi hay que girar.
+     Pero abierto en un celular parado, la pantalla ya es vertical: girarla
+     otra vez la dejaba acostada y chiquita en una franja del medio, y ahi
+     Fausto veia todo apretado y encimado. Con esto el celular muestra el
+     totem derecho y a pantalla completa, y la tele queda exactamente igual.
+     De paso resuelve la placa nueva: si viene de fabrica en vertical, el
+     totem no gira y corre mas liviano, sin tocar nada. */
+  ROTAR_90:!ESPEJO && window.innerWidth > window.innerHeight,
   SONIDO:!ESPEJO,
 
   IG:'@beerpunch.mdz',
@@ -1121,7 +1135,7 @@ function pintarRanking(){
     const gente=personasAnotadas(), faltan=MIN_PERSONAS-gente;
     const reloj=`${e.h}H ${String(e.m).padStart(2,'0')}M`;
     c.innerHTML=e.pasado
-      ?(gana?`GANÓ <b>${esc(gana.nombre)}</b> — ${gana.entregado?'PREMIO ENTREGADO':'PASÁ POR LA CAJA A BUSCARLO'}`
+      ?(gana?`GANÓ <b>${esc(gana.nombre)}</b> — ${gana.entregado?'PREMIO ENTREGADO':'RETIRALO EN LA CAJA'}`
             :'PREMIO ENTREGADO — ARRANCA UNA NOCHE NUEVA')
       /* Los dos mensajes no entran juntos en el renglón: partido en dos
          líneas le roba alto a la tabla. Se alternan con el giro de pestañas,
@@ -1130,6 +1144,12 @@ function pintarRanking(){
         ?`${faltan===1?'FALTA <b>1 PERSONA</b>':'FALTAN <b>'+faltan+' PERSONAS</b>'} PARA LA BIRRITA`
         :`PREMIO A LAS ${e.label} — FALTAN <b>${reloj}</b>`);
     if(e.urge&&faltan>0)c.className='urge';
+    /* Se achica hasta entrar en un renglon. Se mide con scrollWidth y no con
+       getBoundingClientRect: el totem esta girado 90 grados y el rectangulo
+       girado da el alto donde uno espera el ancho. */
+    c.style.fontSize='';
+    for(let t=1.95;t>1.2&&c.scrollWidth>c.clientWidth+1;t-=0.05)
+      c.style.fontSize='calc('+t.toFixed(2)+' * var(--u))';
   }else c.style.display='none';
 
   /* ─── NOCHE / HISTÓRICO ─── */
@@ -1285,8 +1305,24 @@ function pintarRanking(){
     function(x){ return x.scrollWidth>x.clientWidth+1; });
   dibujar(1,1);
   for(let i=1;i<=10 && gr>1 && cortado();i++){ gr=Math.max(1,gr-0.05); dibujar(1,1); }
+  /* EL AGRANDADO TAMBIEN SE DEVUELVE SI NO ENTRA DE ALTO.
+     Con pocos renglones la letra se agranda (gr), y ese agrandado solo se
+     bajaba si un nombre quedaba cortado de ANCHO. Si lo que no entraba era
+     el ALTO -pantalla chica, nombres con Instagram abajo, el renglon que se
+     asoma- el agrandado se quedaba, la letra ya estaba en su minimo, y la
+     ultima fila se salia del panel y quedaba encima del cartel de abajo
+     ("FALTAN 3 PERSONAS"). Es un regalo para cuando sobra lugar: si no
+     sobra, se devuelve antes de achicar nada mas. */
+  for(let i=1;i<=10 && gr>1 && noEntra();i++){ gr=Math.max(1,gr-0.05); dibujar(1,1); }
   for(let i=1;i<=8 && noEntra();i++) dibujar(1,Math.max(0.2,1-0.1*i));
   for(let i=1;i<=14 && noEntra();i++) dibujar(Math.max(0.42,1-0.05*i),0.2);
+  /* Ultimo recurso: si con todo al minimo sigue sin entrar, se sacan del
+     final lo que es adorno -los avisos y el renglon que se asoma- hasta que
+     entre. Un nombre real nunca se saca: lo que se va es lo que no es de
+     nadie. Nada puede quedar pisando la zona de abajo. */
+  while(noEntra()&&f.lastElementChild&&
+        (!f.lastElementChild.classList.contains('fil')||f.lastElementChild.classList.contains('asoma')))
+    f.removeChild(f.lastElementChild);
 }
 setInterval(()=>{if(S.ocupado||S.packsAbierto)return;vistaSiguiente();pintarTabs();pintarRanking();},T.tab);
 
@@ -2086,6 +2122,16 @@ function aplicarEstado(e,deCache){
     if(m!==qrEnModoPremio){ qrEnModoPremio=m; pintarQR(); }
   }
   pintarRecord(); pintarRanking(); pintarLema();
+  /* En la ultima hora el renglon de arriba y el cartel de abajo cuentan la
+     misma gente ("FALTAN 2 PERSONAS"). El ranking se repinta al toque, pero
+     el cartel esperaba su turno de rotacion: durante unos segundos arriba
+     decia 2 y abajo 3, en la misma pantalla. Si cambio la cuenta, el cartel
+     se repinta tambien. */
+  try{
+    const g=personasAnotadas();
+    if(S.gentePintada!==undefined&&g!==S.gentePintada&&esUltimaHora())pintarCard();
+    S.gentePintada=g;
+  }catch(x){}
 }
 function llegaGolpe(g){
   const previo=S.record.score;
@@ -2344,4 +2390,3 @@ if(DEMO) setTimeout(arrancarDemo,600);
 </script>
 </body>
 </html>
-
