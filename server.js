@@ -66,6 +66,7 @@ const PORCENTAJE_BAR = 20;  // lo que le toca a Andres sobre el neto
 
 const NTFY_TOPIC = process.env.NTFY_TOPIC || '';
 let alertaShellyActiva = false;
+let caidaAvisadaFuerte = false;   // ya sono la alarma de "QR caido" por este corte
 let avisoOlvidoEnviado = false;
 
 let qrCortado = false;
@@ -339,6 +340,14 @@ function anotarRed(req) {
     if (uptimeShelly > 0 && up < uptimeShelly - 60) {
       log('MAQUINA REINICIADA', 'el Shelly volvio a arrancar (venia prendido hace ' +
           Math.round(uptimeShelly / 60) + ' min)');
+      // Si no llego a darse por caida, nadie se entero: un corte de luz
+      // corto o un reinicio del Shelly. Si estaba caida, el aviso de
+      // "prendieron la maquina" sale cuando se cierra la caida.
+      if (!qrCortado && !alertaShellyActiva) {
+        avisar('BPK - Se reinicio la maquina',
+          'El Shelly arranco de nuevo sin llegar a cortarse (venia prendido hace ' +
+          durTexto(uptimeShelly / 60) + '). Suele ser un corte de luz corto.', false, 'electric_plug');
+      }
       ultimoArranqueShelly = Date.now() - up * 1000;
       if (MET) { try { MET.anotarArranque(); } catch (e) {} }
     }
@@ -432,14 +441,35 @@ function yaDeberiaEstarPrendida() {
   return t.minutos < minutoDeCierre();
 }
 
+/* HORA DE CIERRE NORMAL.
+   El horario dice 3:30 de domingo a jueves, pero de domingo a miercoles el
+   bar cierra entre las 2 y las 3. A esa hora, que la maquina se apague es
+   que cerraron: no tiene que sonar la alarma de "se corto la maquina". Lo
+   mismo en la ultima media hora de cualquier noche. */
+function esCierreNormal() {
+  const t = ahoraArg();
+  const cierre = minutoDeCierre();
+  if (t.minutos >= 12 * 60 || t.minutos >= cierre) return false;
+  if (cierre - t.minutos <= 30) return true;
+  const nocheDe = (t.dia + 6) % 7;               // 0 domingo ... 3 miercoles
+  return nocheDe <= 3 && t.minutos >= 2 * 60;
+}
+
+// 897 -> "14 h 57 min"
+function durTexto(min) {
+  min = Math.max(0, Math.round(min || 0));
+  if (min < 60) return min + ' min';
+  return Math.floor(min / 60) + ' h' + (min % 60 ? ' ' + (min % 60) + ' min' : '');
+}
+
 // ===== AVISOS AL CELULAR =====
-function avisar(titulo, texto, urgente) {
+function avisar(titulo, texto, urgente, icono) {
   if (!NTFY_TOPIC) return;
   axios.post('https://ntfy.sh/' + NTFY_TOPIC, texto, {
     headers: {
       'Title': titulo,
       'Priority': urgente ? 'urgent' : 'default',
-      'Tags': urgente ? 'rotating_light' : 'white_check_mark'
+      'Tags': icono || (urgente ? 'rotating_light' : 'white_check_mark')
     },
     timeout: 10000
   }).catch(function (e) {
@@ -744,11 +774,22 @@ async function vigilarShelly() {
     // Se registra en el log pero no suena el telefono: un aviso que llega
     // todas las noches deja de significar algo.
     abrirCaida(ultimoPoll || (Date.now() - silencioMs));
-    if (!enHorarioDeBar()) {
+    if (!enHorarioDeBar() || esCierreNormal()) {
+      /* Bar cerrado u hora de cierre: no suena la alarma, llega un aviso
+         comun. Sirve para saber a que hora la apagan. Si el servidor recien
+         arranca y nunca la vio prendida, no se avisa nada: no sabemos
+         cuando se apago. */
       alertaShellyActiva = true;
-      log('MAQUINA APAGADA', 'dejo de responder (bar cerrado, no se avisa al celular)');
+      const porque = enHorarioDeBar() ? 'hora de cierre' : 'bar cerrado';
+      log('MAQUINA APAGADA', 'dejo de responder (' + porque + '): aviso comun, sin alarma');
+      if (ultimoPoll) {
+        avisar('BPK - Apagaron la maquina',
+          'Dejo de responder a las ' + horaCorta(ultimoPoll) + '.' +
+          (enHorarioDeBar() ? ' Es hora de cierre: no es una alarma.' : ''), false, 'zzz');
+      }
     } else {
       alertaShellyActiva = true;
+      caidaAvisadaFuerte = true;
       avisar(
         'BPK - QR caido',
         'El Shelly no responde hace ' + silencioMin + ' min.\n' +
@@ -769,25 +810,24 @@ async function vigilarShelly() {
     alertaShellyActiva = false;
     avisoOlvidoEnviado = false;
     const cerrada = cerrarCaida();
-    if (enHorarioDeBar()) {
-      // En el momento del corte es imposible saber si fue el wifi o si la
-      // apagaron: se sabe recien cuando vuelve (si aviso arranque, la
-      // apagaron; si volvio a responder sin avisar, fue la conexion).
-      let porque = '';
-      if (cerrada) {
-        const min = minutosDe(cerrada);
-        porque = '\nEstuvo ' + min + ' min afuera. ' +
-          (cerrada.motivo === 'apagada'
-            ? 'Fue APAGADO: la apagaron ' + horaCorta(cerrada.apagada) +
-              ' y la prendieron ' + horaCorta(cerrada.prendida) + '.'
-            : 'Fue el WIFI: la maquina nunca se apago, se quedo sin conexion' +
-              (redShelly ? ' (estaba en "' + redShelly + '")' : '') + '.') +
-          (cerrada.seguro ? '' : ' (deducido, sin dato de encendido)');
-      }
-      avisar('BPK - Maquina OK', 'El Shelly volvio y el QR esta activo de nuevo.' + porque, false);
-    } else {
-      log('SHELLY OK', 'volvio, pero el bar esta cerrado: no se avisa');
+    caidaAvisadaFuerte = false;
+    /* Siempre se avisa, con el bar abierto o cerrado. Recien cuando vuelve
+       se sabe si fue apagado (el Shelly arranco de cero) o el wifi (nunca
+       se apago). */
+    let titulo = 'BPK - Volvio la maquina';
+    let texto = 'El Shelly volvio y el QR esta activo de nuevo.';
+    if (cerrada && cerrada.motivo === 'apagada') {
+      titulo = 'BPK - Prendieron la maquina';
+      texto = 'La prendieron a las ' + horaCorta(cerrada.prendida || Date.now()) +
+        '. Estuvo apagada ' + durTexto(minutosDe(cerrada)) + '.' +
+        (enHorarioDeBar() ? ' El QR ya cobra.' : '');
+    } else if (cerrada) {
+      texto = 'Se habia cortado el wifi ' + durTexto(minutosDe(cerrada)) +
+        (redShelly ? ' (estaba en "' + redShelly + '")' : '') + '. El QR esta activo de nuevo.';
     }
+    if (cerrada && !cerrada.seguro) texto += ' (deducido, sin dato de encendido)';
+    log('SHELLY OK', titulo.replace('BPK - ', '').toLowerCase());
+    avisar(titulo, texto, false, cerrada && cerrada.motivo === 'apagada' ? 'electric_plug' : 'white_check_mark');
   }
 
   // El bar ya abrio hace rato y la maquina sigue muerta. Nadie se dio cuenta.
@@ -797,13 +837,14 @@ async function vigilarShelly() {
   const t2 = ahoraArg();
   const enElCierre = t2.minutos < minutoDeCierre() && (minutoDeCierre() - t2.minutos) <= 30;
 
-  if (caido && yaDeberiaEstarPrendida() && !avisoOlvidoEnviado && !enElCierre) {
+  if (caido && yaDeberiaEstarPrendida() && !avisoOlvidoEnviado && !enElCierre && !esCierreNormal()) {
     avisoOlvidoEnviado = true;
     // No es lo mismo "nunca la prendieron" que "venia andando y se corto".
     const anduvoHoy = ultimoPoll && ultimoPoll >= inicioJornada();
     if (anduvoHoy) {
       log('MAQUINA MUDA', 'venia andando en esta jornada y se corto hace ' + silencioMin + ' min');
-      avisar(
+      // Si ya sono "QR caido" por este mismo corte, no se manda otra alarma igual.
+      if (!caidaAvisadaFuerte) avisar(
         'BPK - Se corto la maquina',
         'La maquina venia andando y dejo de responder hace ' + silencioMin + ' min.\n' +
         'NO es que se olvidaron de prenderla: se cayo la conexion o la apagaron.\n\n' +
@@ -1431,10 +1472,10 @@ app.get('/cupones', function (req, res) {
 
 '<div class="tablero">' +
 '<div class="cifra">' + s.disponibles + '</div>' +
-'<div class="rot">sin usar</div>' +
+'<div class="rot">quedan por repartir &middot; de ' + s.total + ' impresos</div>' +
 '<div class="trio">' +
-'<div><b>' + s.canjesHoy + '</b><span>hoy</span></div>' +
-'<div><b>' + s.usados + '</b><span>usados</span></div>' +
+'<div><b>' + s.usados + '</b><span>ya se usaron</span></div>' +
+'<div><b>' + s.canjesHoy + '</b><span>usados hoy</span></div>' +
 '<div><b>' + s.conversion + '%</b><span>compr\u00f3 despu\u00e9s</span></div>' +
 '</div></div>' +
 
@@ -1906,7 +1947,9 @@ app.get('/admin', function (req, res) {
 '<a class="b" href="/premios' + c + '">Premios &middot; la caja</a>' +
 '<a class="b" href="/fotos' + c + '">Fotos del display</a>' +
 '<a class="b" href="/metricas' + c + '">M&eacute;tricas</a>' +
+'<a class="b" href="/ingresos' + c + '">Ingresos por mes</a>' +
 '<a class="b" href="/probar' + c + '">Probar</a>' +
+'<a class="b" href="/exportar' + c + '">Exportar datos</a>' +
 '</div></div>' +
 
 '<div class="seccion">' +
@@ -1928,12 +1971,19 @@ app.get('/admin', function (req, res) {
       '<div class="botones" style="margin-top:12px">' +
       '<a class="b ancho" href="/cupones">Cargar o crear cupones</a></div>';
   }
-  let f = '<div class="reparto"><span>Sin usar</span><b>' + s2.disponibles + ' de ' + s2.total + '</b></div>' +
-    '<div class="reparto"><span>Canjeados hoy</span><b>' + s2.canjesHoy + '</b></div>' +
-    '<div class="reparto"><span>Compr\u00f3 en 5 min</span><b>' + s2.conv5 + ' \u00b7 ' + s2.tasa5 + '%</b></div>' +
-    '<div class="reparto"><span>Compr\u00f3 en 15 min</span><b>' + s2.conv15 + ' \u00b7 ' + s2.tasa15 + '%</b></div>' +
+  /* Los 72 son los impresos que se le dieron al bar para repartir. Lo
+     unico seguro es cuantos se usaron; el resto sigue en la caja. Antes
+     decia "por cupon repartido" dividiendo por los usados, y "sin usar"
+     sin decir que eran los que quedan. */
+  let f = '<div class="reparto"><span>Impresos</span><b>' + s2.total + '</b></div>' +
+    '<div class="reparto"><span>Ya se usaron</span><b>' + s2.usados + '</b></div>' +
+    '<div class="reparto"><span>Quedan por repartir</span><b>' + s2.disponibles + '</b></div>' +
+    '<div class="reparto"><span>Usados hoy</span><b>' + s2.canjesHoy + '</b></div>' +
+    '<div class="reparto"><span>Compraron despu\u00e9s (15 min)</span><b>' + s2.conv15 + ' de ' + s2.canjesTotal +
+      ' \u00b7 ' + s2.tasa15 + '%</b></div>' +
     '<div class="reparto"><span>Plata que trajeron</span><b>$' + s2.recaudado.toLocaleString('es-AR') + '</b></div>' +
-    '<div class="reparto"><span>Por cup\u00f3n repartido</span><b>$' + s2.ingresoPorCupon.toLocaleString('es-AR') + '</b></div>';
+    '<div class="reparto"><span>Por cup\u00f3n usado</span><b>$' +
+      (s2.usados ? Math.round(s2.recaudado / s2.usados) : 0).toLocaleString('es-AR') + '</b></div>';
   if (s2.mejorHora) {
     f += '<div class="reparto"><span>Mejor hora</span><b>' + s2.mejorHora.hora + ':00 \u00b7 ' +
       Math.round(s2.mejorHora.tasa * 100) + '%</b></div>';
@@ -1979,8 +2029,13 @@ app.get('/admin', function (req, res) {
      mirando. Una caida que arranco anteayer y sigue abierta aporta a "hoy"
      nada mas que lo de hoy. Sin este recorte, una caida vieja se sumaba
      entera todos los dias: de ahi salian las 271 horas "de hoy". */
+  /* El apagado de cierre (desde las 2 de domingo a miercoles, o la ultima
+     media hora) no cuenta hasta que el bar vuelve a abrir a las 17. */
+  const finCierre = function (c) {
+    return (MET && MET.finDelCierre) ? (MET.finDelCierre(c) || 0) : 0;
+  };
   const minutosAbiertos = function (c, desde, hasta) {
-    const a = Math.max(c.inicio, desde);
+    const a = Math.max(c.inicio, desde, finCierre(c));
     const b = Math.min(c.fin || Date.now(), hasta);
     if (b <= a) return 0;
     if (MET && MET.minutosAbiertosDe) { try { return MET.minutosAbiertosDe(a, b); } catch (e) {} }
@@ -1998,7 +2053,7 @@ app.get('/admin', function (req, res) {
       if (m <= 0) return;
       // Si la caida ya venia de antes de abrir, lo que se perdio es apertura
       // tardia. Si empezo con el bar ya abierto, es un corte en plena noche.
-      if (MET && MET.abiertoEn && !MET.abiertoEn(Math.max(c.inicio, desde))) { tarde += m; nTarde++; }
+      if (finCierre(c) || (MET && MET.abiertoEn && !MET.abiertoEn(Math.max(c.inicio, desde)))) { tarde += m; nTarde++; }
       else { corte += m; nCorte++; }
     });
     return { tarde: tarde, corte: corte, nTarde: nTarde, nCorte: nCorte, total: tarde + corte };
