@@ -438,6 +438,81 @@ module.exports = function montarPinas(app, ctx) {
     };
   }
 
+  /* AVISOS DE LA TELE: PRENDIDA, APAGADA Y CON BARRA.
+     Desde la v3 el totem dice al conectarse si esta en pantalla completa
+     ("-OK" al final de la version) o con la barra del navegador ("-BARRA").
+     Con eso:
+       - al prenderse, cuando lleva 2 minutos sin cambiar, llega "prendieron
+         el totem" o "totem con barra: que aprieten OK"
+       - si en la noche cambia (recargaron, se salio de pantalla completa,
+         apretaron OK) llega el aviso cuando el cambio dura 2 minutos: una
+         recarga que alguien arregla al toque no molesta a nadie
+       - al apagarse, "se apago el totem".
+     Recien arrancado el servidor no se avisa nada de lo que ya estaba. */
+  const ESPERA_AVISO_TELE = 2 * 60 * 1000;
+  const tele = { prendido: null, modo: '', modoDesde: 0, avisado: null, prendidoDesde: 0 };
+  function modoPantalla(v) {
+    v = String(v || '');
+    if (/-BARRA$/.test(v)) return 'BARRA';
+    if (/-OK$/.test(v)) return 'OK';
+    return '';
+  }
+  function horaTele(ts) {
+    return new Date(ts).toLocaleTimeString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires',
+      hour: '2-digit', minute: '2-digit', hour12: false });
+  }
+  function vigilarTele() {
+    const t = estadoTotem();
+    const ahora = Date.now();
+    const modo = modoPantalla(visto.version);
+    if (modo !== tele.modo) { tele.modo = modo; tele.modoDesde = ahora; }
+    if (tele.prendido === null) {
+      tele.prendido = t.prendido;
+      tele.avisado = t.prendido ? modo : null;
+      return;
+    }
+    if (t.prendido && !tele.prendido) {
+      tele.prendido = true;
+      tele.prendidoDesde = t.desde || ahora;
+      tele.modoDesde = ahora;            // lo de anoche no cuenta: se mide desde que prendio
+      tele.avisado = null;
+      log('TOTEM', 'se prendio la tele');
+    } else if (!t.prendido && tele.prendido) {
+      tele.prendido = false;
+      log('TOTEM', 'se apago la tele');
+      avisar('BPK - Se apago el totem', 'La tele dejo de mostrar el totem a las ' +
+        horaTele(t.ultimo || ahora) + '.', false, 'tv');
+      return;
+    }
+    if (!t.prendido || ahora - tele.modoDesde < ESPERA_AVISO_TELE) return;
+    if (tele.avisado === null) {
+      tele.avisado = modo;
+      const hora = horaTele(tele.prendidoDesde || ahora);
+      if (modo === 'BARRA') {
+        log('TOTEM', 'prendida con la barra del navegador');
+        avisar('BPK - Totem prendido CON BARRA', 'Se prendio a las ' + hora +
+          ' pero esta con la barra del navegador al costado. Que aprieten OK en el control de la tele.',
+          false, 'warning');
+      } else {
+        avisar('BPK - Prendieron el totem', 'Se prendio a las ' + hora +
+          (modo === 'OK' ? ' y esta en pantalla completa.' : '.'), false, 'tv');
+      }
+      return;
+    }
+    if (modo && modo !== tele.avisado) {
+      tele.avisado = modo;
+      if (modo === 'BARRA') {
+        log('TOTEM', 'volvio la barra del navegador');
+        avisar('BPK - Volvio la barra al totem', 'Desde las ' + horaTele(tele.modoDesde) +
+          ' la tele esta con la barra del navegador. Que aprieten OK en el control.', false, 'warning');
+      } else {
+        log('TOTEM', 'pantalla completa');
+        avisar('BPK - Totem OK', 'Ya esta en pantalla completa.', false, 'white_check_mark');
+      }
+    }
+  }
+  setInterval(vigilarTele, 30 * 1000);
+
   app.get('/api/stream', function (req, res) {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -1918,11 +1993,29 @@ module.exports = function montarPinas(app, ctx) {
   });
 
   // ===== MODERACION =====
+  // Las pinas de una noche (por defecto, la de hoy). La pantalla de fotos
+  // deja mirar noches anteriores.
   app.get('/api/pinas', function (req, res) {
     if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
-    const hoy = nocheHoy();
-    res.json(pinas.filter(function (p) { return p.noche === hoy; })
+    const pedida = String(req.query.noche || '');
+    const noche = /^\d{4}-\d{2}-\d{2}$/.test(pedida) ? pedida : nocheHoy();
+    res.json(pinas.filter(function (p) { return p.noche === noche; })
                   .sort(function (a, b) { return b.ts - a.ts; }));
+  });
+
+  // Las ultimas noches con pinas, con cuantas fotos tiene cada una.
+  app.get('/api/pinas/noches', function (req, res) {
+    if (!claveOk(req)) return res.status(401).json({ error: 'clave' });
+    const hoy = nocheHoy();
+    const por = {};
+    por[hoy] = { noche: hoy, pinas: 0, fotos: 0 };
+    pinas.forEach(function (p) {
+      if (!p.noche) return;
+      const x = por[p.noche] || (por[p.noche] = { noche: p.noche, pinas: 0, fotos: 0 });
+      x.pinas++;
+      if (p.foto) x.fotos++;
+    });
+    res.json(Object.keys(por).sort().reverse().slice(0, 30).map(function (k) { return por[k]; }));
   });
 
   app.post('/api/pinas/:id/ocultar', function (req, res) {
@@ -1936,85 +2029,12 @@ module.exports = function montarPinas(app, ctx) {
     res.json({ ok: true, oculta: p.oculta });
   });
 
-  // ===== PANTALLA DE MODERACION (la de Aldana) =====
-  // Las pinas de la noche con la foto al lado y un boton para ocultar.
-  // Pensada para el celular, detras de la clave.
-  const HTML_FOTOS = [
-'<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">',
-'<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">',
-'<meta name="color-scheme" content="dark"><title>BeerPunch \u00b7 Pi\u00f1as de la noche</title>',
-'<style>',
-'*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}',
-'body{background:#0a0b10;color:#fff;font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;',
-'  padding:0 14px calc(40px + env(safe-area-inset-bottom));max-width:620px;margin:0 auto}',
-'header{position:sticky;top:0;background:#0a0b10;padding:18px 0 12px;border-bottom:1px solid #23262f;z-index:5}',
-'h1{font-size:19px;letter-spacing:.5px}h1 span{color:#D7252A}',
-'.sub{color:#8b93a1;font-size:13px;margin-top:3px}',
-'.fila{display:flex;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid #191c23}',
-'.fila.off{opacity:.4}',
-'.foto{width:74px;height:74px;flex:none;border-radius:10px;object-fit:cover;background:#161922;border:1px solid #23262f}',
-'.foto.sin{display:flex;align-items:center;justify-content:center;font-size:10px;color:#5b6270;text-align:center}',
-'.dat{flex:1;min-width:0}',
-'.nom{font-weight:700;letter-spacing:.6px;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-'.meta{color:#8b93a1;font-size:12.5px;margin-top:2px}',
-'.sc{font-weight:800;font-size:21px;color:#FFD518;font-variant-numeric:tabular-nums}',
-'.f{background:#F1437B22;color:#F1437B;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700}',
-'button.ac{flex:none;border:1px solid #3a4150;background:#161922;color:#c7cdd6;border-radius:9px;',
-'  padding:10px 12px;font-size:12.5px;font-weight:700;letter-spacing:.5px;cursor:pointer}',
-'button.ac.on{border-color:#D7252A;background:#D7252A22;color:#ff8b8d}',
-'.vacio{text-align:center;color:#5b6270;padding:50px 0}',
-'.err{background:#3a1212;border:1px solid #7a2323;color:#ff9a9c;padding:14px;border-radius:10px;margin-top:18px}',
-'</style></head><body>',
-'<header><h1>BEER<span>PUNCH</span> \u00b7 pi\u00f1as de la noche</h1>',
-'<div class="sub" id="sub">cargando\u2026</div></header>',
-'<div id="lista"></div>',
-'<script>',
-'var CLAVE=new URLSearchParams(location.search).get("clave")||"";',
-'var q=CLAVE?("?clave="+encodeURIComponent(CLAVE)):"";',
-'function hora(ts){return new Date(ts).toLocaleTimeString("es-AR",{timeZone:"America/Argentina/Buenos_Aires",hour:"2-digit",minute:"2-digit",hour12:false});}',
-'function pintar(ps){',
-'  var L=document.getElementById("lista");L.innerHTML="";',
-'  document.getElementById("sub").textContent=ps.length+" pi\u00f1as \u00b7 toc\u00e1 OCULTAR para sacarla del ranking";',
-'  if(!ps.length){L.innerHTML="<div class=\'vacio\'>Todav\u00eda no carg\u00f3 nadie</div>";return;}',
-'  ps.forEach(function(p){',
-'    var d=document.createElement("div");d.className="fila"+(p.oculta?" off":"");',
-'    var img;',
-'    if(p.foto){img=document.createElement("img");img.className="foto";img.src="/api/foto/"+p.foto+q;img.alt="";}',
-'    else{img=document.createElement("div");img.className="foto sin";img.textContent="SIN FOTO";}',
-'    d.appendChild(img);',
-'    var dat=document.createElement("div");dat.className="dat";',
-'    var n=document.createElement("div");n.className="nom";n.textContent=p.apodo;',
-'    if(p.sexo==="F"){var b=document.createElement("span");b.className="f";b.textContent="MUJER";n.appendChild(document.createTextNode(" "));n.appendChild(b);}',
-'    dat.appendChild(n);',
-'    var sc=document.createElement("div");sc.className="sc";sc.textContent=p.score;dat.appendChild(sc);',
-'    var m=document.createElement("div");m.className="meta";',
-'    m.textContent=hora(p.ts)+(p.ig?" \u00b7 "+p.ig:"")+(p.oculta?" \u00b7 OCULTA":"");',
-'    dat.appendChild(m);d.appendChild(dat);',
-'    var bt=document.createElement("button");bt.className="ac"+(p.oculta?" on":"");',
-'    bt.textContent=p.oculta?"MOSTRAR":"OCULTAR";',
-'    bt.onclick=function(){',
-'      bt.disabled=true;',
-'      fetch("/api/pinas/"+p.id+"/ocultar"+q,{method:"POST"})',
-'        .then(function(r){return r.json();})',
-'        .then(function(){cargar();})',
-'        .catch(function(){bt.disabled=false;bt.textContent="ERROR";});',
-'    };',
-'    d.appendChild(bt);L.appendChild(d);',
-'  });',
-'}',
-'function cargar(){',
-'  fetch("/api/pinas"+q).then(function(r){',
-'    if(r.status===401){throw new Error("clave");}',
-'    return r.json();',
-'  }).then(pintar).catch(function(e){',
-'    document.getElementById("lista").innerHTML=',
-'      "<div class=\'err\'>"+(e.message==="clave"?"Clave incorrecta. Abr\u00ed el link con ?clave=\u2026":"No se pudo cargar. Revis\u00e1 la conexi\u00f3n.")+"</div>";',
-'    document.getElementById("sub").textContent="";',
-'  });',
-'}',
-'cargar();setInterval(cargar,20000);',
-'<\/script></body></html>'
-  ].join('\n');
+  // ===== FOTOS DEL DISPLAY: UNA SOLA PANTALLA =====
+  // Antes habia una lista chiquita aca y otra tira en /metricas. Ahora es
+  // una sola: las fotos en grande, por noche, se tocan para verlas a
+  // pantalla completa, se pasan con el dedo y desde ahi se ocultan del
+  // ranking si el puntaje no coincide con la foto. Detras de la clave.
+  const HTML_FOTOS = "<!DOCTYPE html><html lang=\"es\"><head><meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\n<meta name=\"color-scheme\" content=\"dark\"><title>BeerPunch · Fotos del display</title>\n<style>\n*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}\nbody{background:#0a0b10;color:#fff;font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;\n  padding:0 14px calc(40px + env(safe-area-inset-bottom));max-width:760px;margin:0 auto}\nbody.quieto{overflow:hidden}\nheader{position:sticky;top:0;background:#0a0b10;padding:16px 0 10px;border-bottom:1px solid #23262f;z-index:5}\nh1{font-size:19px;letter-spacing:.5px}h1 span{color:#EC1C24}\n.sub{color:#8b93a1;font-size:13px;margin-top:2px}\n.noches{display:flex;gap:7px;overflow-x:auto;margin-top:11px;padding-bottom:2px;scrollbar-width:none}\n.noches::-webkit-scrollbar{display:none}\n.noches button{flex:none;border:1px solid #2b303b;background:#14171e;color:#c7cdd6;border-radius:999px;\n  padding:7px 13px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}\n.noches button.on{background:#FFD518;border-color:#FFD518;color:#000}\n.noches button i{font-style:normal;opacity:.65;margin-left:5px}\n.grilla{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:14px}\n.ft{position:relative;display:block;width:100%;padding:0;border:1px solid #23262f;border-radius:12px;overflow:hidden;\n  background:#14171e;cursor:pointer;color:inherit;font:inherit;text-align:left}\n.ft img{display:block;width:100%;aspect-ratio:3/4;object-fit:cover;background:#161922}\n.ft .pie{position:absolute;left:0;right:0;bottom:0;padding:26px 9px 8px;background:linear-gradient(transparent,rgba(0,0,0,.88))}\n.ft .sc{display:block;font-weight:800;font-size:23px;line-height:1;color:#FFD518;font-variant-numeric:tabular-nums}\n.ft .nm{display:block;font-weight:700;font-size:13px;letter-spacing:.4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px}\n.ft .hr{display:block;color:#aab1bd;font-size:11.5px}\n.ft.off img{opacity:.35}\n.tag{position:absolute;top:8px;left:8px;color:#fff;font-size:10.5px;font-weight:800;letter-spacing:.6px;padding:2px 7px;border-radius:6px}\n.tag.oc{background:#EC1C24}\n.tag.f{background:#F1437B;left:auto;right:8px}\nh2{font-size:12.5px;letter-spacing:1.5px;color:#8b93a1;margin:28px 0 4px;text-transform:uppercase}\n.fila{display:flex;gap:12px;align-items:center;padding:11px 0;border-bottom:1px solid #191c23}\n.fila.off{opacity:.4}\n.fila .dat{flex:1;min-width:0}\n.fila .nm{font-weight:700;letter-spacing:.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.fila .meta{color:#8b93a1;font-size:12.5px}\n.fila .sc{font-weight:800;font-size:20px;color:#FFD518;font-variant-numeric:tabular-nums}\nbutton.ac{flex:none;border:1px solid #3a4150;background:#161922;color:#c7cdd6;border-radius:9px;\n  padding:10px 13px;font-size:12.5px;font-weight:700;letter-spacing:.5px;cursor:pointer}\nbutton.ac.on{border-color:#EC1C24;background:#EC1C2422;color:#ff8b8d}\n.vacio{text-align:center;color:#5b6270;padding:50px 0}\n.err{background:#3a1212;border:1px solid #7a2323;color:#ff9a9c;padding:14px;border-radius:10px;margin-top:18px}\n#visor{position:fixed;inset:0;background:#000;z-index:20;display:none;flex-direction:column}\n#visor.on{display:flex}\n#visor .arriba{display:flex;align-items:center;gap:12px;padding:calc(10px + env(safe-area-inset-top)) 14px 10px}\n#visor .arriba .dat{flex:1;min-width:0}\n#visor .vsc{font-weight:800;font-size:30px;line-height:1;color:#FFD518;font-variant-numeric:tabular-nums}\n#visor .vnm{font-weight:700;letter-spacing:.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n#visor .vmeta{color:#8b93a1;font-size:12.5px}\n#visor .x{flex:none;width:44px;height:44px;border-radius:50%;border:1px solid #2b303b;background:#14171e;color:#fff;font-size:22px;cursor:pointer}\n#visor .img{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}\n#visor img{display:block;width:100%;height:100%;object-fit:contain}\n#visor .ant,#visor .sig{position:absolute;top:50%;transform:translateY(-50%);width:46px;height:70px;border:0;border-radius:10px;\n  background:rgba(255,255,255,.1);color:#fff;font-size:28px;cursor:pointer}\n#visor .ant{left:8px}#visor .sig{right:8px}\n#visor .abajo{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:10px 14px calc(14px + env(safe-area-inset-bottom))}\n#visor .abajo a{color:#8b93a1;font-size:13px;text-decoration:none}\n#visor .cuenta{color:#8b93a1;font-size:13px}\n</style></head><body>\n<header><h1>BEER<span>PUNCH</span> · fotos del display</h1>\n<div class=\"sub\" id=\"sub\">cargando…</div>\n<div class=\"noches\" id=\"noches\"></div></header>\n<div id=\"lista\"></div>\n<div id=\"visor\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Foto del display\">\n  <div class=\"arriba\"><div class=\"dat\"><div class=\"vsc\" id=\"vSc\"></div><div class=\"vnm\" id=\"vNm\"></div><div class=\"vmeta\" id=\"vMeta\"></div></div>\n    <button class=\"x\" id=\"vX\" aria-label=\"Cerrar\">×</button></div>\n  <div class=\"img\"><img id=\"vImg\" alt=\"\"><button class=\"ant\" id=\"vAnt\" aria-label=\"Anterior\">‹</button><button class=\"sig\" id=\"vSig\" aria-label=\"Siguiente\">›</button></div>\n  <div class=\"abajo\"><span class=\"cuenta\" id=\"vCuenta\"></span><a id=\"vOrig\" target=\"_blank\" rel=\"noopener\">abrir original</a><button class=\"ac\" id=\"vOc\"></button></div>\n</div>\n<script>\nvar CLAVE=new URLSearchParams(location.search).get(\"clave\")||\"\";\nvar q=CLAVE?(\"?clave=\"+encodeURIComponent(CLAVE)):\"\";\nvar amp=CLAVE?(\"&clave=\"+encodeURIComponent(CLAVE)):\"\";\nvar TZ=\"America/Argentina/Buenos_Aires\";\nvar noche=\"\",hoy=\"\",lista=[],fotos=[],idx=-1,abierto=false;\nfunction $(id){return document.getElementById(id);}\nfunction hora(ts){return new Date(ts).toLocaleTimeString(\"es-AR\",{timeZone:TZ,hour:\"2-digit\",minute:\"2-digit\",hour12:false});}\nfunction etiqueta(n){\n  if(n===hoy)return \"Esta noche\";\n  var d=new Date(n+\"T15:00:00Z\"),p=n.split(\"-\");\n  return [\"Dom\",\"Lun\",\"Mar\",\"Mié\",\"Jue\",\"Vie\",\"Sáb\"][d.getUTCDay()]+\" \"+p[2]+\"/\"+p[1];\n}\nfunction urlFoto(p){return \"/api/foto/\"+encodeURIComponent(p.foto)+q;}\nfunction falla(e){\n  $(\"lista\").innerHTML=\"<div class='err'>\"+(e.message===\"clave\"?\"Clave incorrecta. Abrí el link desde el panel.\":\"No se pudo cargar. Revisá la conexión.\")+\"</div>\";\n  $(\"sub\").textContent=\"\";\n}\nfunction pedir(url){return fetch(url).then(function(r){if(r.status===401)throw new Error(\"clave\");return r.json();});}\nfunction cargarNoches(){\n  pedir(\"/api/pinas/noches\"+q).then(function(ns){\n    hoy=ns.length?ns[0].noche:\"\";\n    if(!noche){var con=ns.filter(function(n){return n.pinas>0;})[0];noche=(ns[0]&&ns[0].pinas>0)?ns[0].noche:(con?con.noche:hoy);}\n    var c=$(\"noches\");c.innerHTML=\"\";\n    ns.forEach(function(n){\n      if(!n.pinas&&n.noche!==hoy)return;\n      var b=document.createElement(\"button\");b.className=n.noche===noche?\"on\":\"\";\n      b.textContent=etiqueta(n.noche);\n      var i=document.createElement(\"i\");i.textContent=n.fotos+(n.fotos===1?\" foto\":\" fotos\");b.appendChild(i);\n      b.onclick=function(){noche=n.noche;cargarNoches();};\n      c.appendChild(b);\n    });\n    cargar();\n  }).catch(falla);\n}\nfunction cargar(){pedir(\"/api/pinas?noche=\"+noche+amp).then(pintar).catch(falla);}\nfunction botonOcultar(bt,p){\n  bt.className=\"ac\"+(p.oculta?\" on\":\"\");bt.textContent=p.oculta?\"MOSTRAR\":\"OCULTAR\";bt.disabled=false;\n  bt.onclick=function(ev){\n    ev.stopPropagation();bt.disabled=true;\n    fetch(\"/api/pinas/\"+p.id+\"/ocultar\"+q,{method:\"POST\"}).then(function(r){return r.json();})\n      .then(function(r){p.oculta=!!r.oculta;botonOcultar(bt,p);pintar(lista);if(abierto)mostrar();})\n      .catch(function(){bt.disabled=false;bt.textContent=\"ERROR\";});\n  };\n}\nfunction pintar(ps){\n  lista=ps;fotos=ps.filter(function(p){return p.foto;});\n  var sin=ps.filter(function(p){return !p.foto;});\n  $(\"sub\").textContent=ps.length?(fotos.length+(fotos.length===1?\" foto\":\" fotos\")+(sin.length?\" · \"+sin.length+\" sin foto\":\"\")+\" · tocá una para verla grande\"):\"\";\n  var L=$(\"lista\");L.innerHTML=\"\";\n  if(!ps.length){L.innerHTML=\"<div class='vacio'>\"+(noche===hoy?\"Esta noche todavía no cargó nadie\":\"Esa noche no hay piñas\")+\"</div>\";return;}\n  if(fotos.length){\n    var g=document.createElement(\"div\");g.className=\"grilla\";\n    fotos.forEach(function(p,i){\n      var b=document.createElement(\"button\");b.className=\"ft\"+(p.oculta?\" off\":\"\");\n      var im=document.createElement(\"img\");im.loading=\"lazy\";im.alt=\"\";im.src=urlFoto(p);b.appendChild(im);\n      if(p.oculta){var t=document.createElement(\"span\");t.className=\"tag oc\";t.textContent=\"OCULTA\";b.appendChild(t);}\n      if(p.sexo===\"F\"){var f=document.createElement(\"span\");f.className=\"tag f\";f.textContent=\"MUJER\";b.appendChild(f);}\n      var pie=document.createElement(\"span\");pie.className=\"pie\";\n      var sc=document.createElement(\"span\");sc.className=\"sc\";sc.textContent=p.score;pie.appendChild(sc);\n      var nm=document.createElement(\"span\");nm.className=\"nm\";nm.textContent=p.apodo;pie.appendChild(nm);\n      var hr=document.createElement(\"span\");hr.className=\"hr\";hr.textContent=hora(p.ts)+(p.ig?\" · \"+p.ig:\"\");pie.appendChild(hr);\n      b.appendChild(pie);\n      b.onclick=function(){abrir(i);};\n      g.appendChild(b);\n    });\n    L.appendChild(g);\n  }\n  if(sin.length){\n    var h=document.createElement(\"h2\");h.textContent=\"Sin foto (\"+sin.length+\")\";L.appendChild(h);\n    sin.forEach(function(p){\n      var d=document.createElement(\"div\");d.className=\"fila\"+(p.oculta?\" off\":\"\");\n      var dat=document.createElement(\"div\");dat.className=\"dat\";\n      var nm=document.createElement(\"div\");nm.className=\"nm\";nm.textContent=p.apodo;dat.appendChild(nm);\n      var m=document.createElement(\"div\");m.className=\"meta\";m.textContent=hora(p.ts)+(p.ig?\" · \"+p.ig:\"\")+(p.oculta?\" · OCULTA\":\"\");dat.appendChild(m);\n      d.appendChild(dat);\n      var sc=document.createElement(\"div\");sc.className=\"sc\";sc.textContent=p.score;d.appendChild(sc);\n      var bt=document.createElement(\"button\");botonOcultar(bt,p);d.appendChild(bt);\n      L.appendChild(d);\n    });\n  }\n}\nfunction abrir(i){\n  idx=i;abierto=true;mostrar();$(\"visor\").classList.add(\"on\");document.body.classList.add(\"quieto\");\n  try{history.pushState({visor:1},\"\");}catch(e){}\n}\nfunction cerrar(desdeAtras){\n  if(!abierto)return;abierto=false;$(\"visor\").classList.remove(\"on\");document.body.classList.remove(\"quieto\");\n  if(!desdeAtras){try{history.back();}catch(e){}}\n}\nfunction mostrar(){\n  var p=fotos[idx];if(!p){cerrar();return;}\n  $(\"vImg\").src=urlFoto(p);$(\"vOrig\").href=urlFoto(p);\n  $(\"vSc\").textContent=p.score;$(\"vNm\").textContent=p.apodo+(p.sexo===\"F\"?\" · MUJER\":\"\");\n  $(\"vMeta\").textContent=hora(p.ts)+(p.ig?\" · \"+p.ig:\"\")+(p.oculta?\" · OCULTA DEL RANKING\":\"\");\n  $(\"vCuenta\").textContent=(idx+1)+\" de \"+fotos.length;\n  $(\"vAnt\").style.visibility=idx>0?\"visible\":\"hidden\";\n  $(\"vSig\").style.visibility=idx<fotos.length-1?\"visible\":\"hidden\";\n  botonOcultar($(\"vOc\"),p);\n}\nfunction mover(n){var j=idx+n;if(j>=0&&j<fotos.length){idx=j;mostrar();}}\n$(\"vX\").onclick=function(){cerrar();};\n$(\"vAnt\").onclick=function(){mover(-1);};\n$(\"vSig\").onclick=function(){mover(1);};\nwindow.addEventListener(\"popstate\",function(){cerrar(true);});\ndocument.addEventListener(\"keydown\",function(e){\n  if(!abierto)return;\n  if(e.key===\"Escape\")cerrar();else if(e.key===\"ArrowLeft\")mover(-1);else if(e.key===\"ArrowRight\")mover(1);\n});\nvar x0=null;\n$(\"visor\").addEventListener(\"touchstart\",function(e){x0=e.touches.length===1?e.touches[0].clientX:null;},{passive:true});\n$(\"visor\").addEventListener(\"touchend\",function(e){\n  if(x0===null)return;var dx=e.changedTouches[0].clientX-x0;x0=null;\n  if(Math.abs(dx)>50)mover(dx<0?1:-1);\n},{passive:true});\ncargarNoches();\nsetInterval(function(){if(!abierto&&noche===hoy)cargar();},30000);\n</script></body></html>\n";
 
   app.get('/fotos', function (req, res) {
     if (!claveOk(req)) return res.status(401).send('falta la clave');
