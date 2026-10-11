@@ -95,12 +95,47 @@ module.exports = function montarMetricas(app, ctx) {
     return epochArg(man.y, man.m, man.dia, cierreDeLaMadrugadaDe(man.semana));
   }
 
+  /* EL APAGADO DE CIERRE NO ES TIEMPO MUERTO.
+     El horario cargado dice que de domingo a jueves se cierra a las 3:30,
+     pero de domingo a miercoles el bar baja la persiana entre las 2 y las 3.
+     Esa apagada se contaba como "sin poder cobrar con el bar abierto" y
+     sumaba horas de tiempo muerto que no eran plata perdida. Una caida que
+     arranca de madrugada -desde las 2 de domingo a miercoles, o en la ultima
+     media hora de cualquier noche- y no vuelve esa misma noche es el cierre:
+     se cuenta con el bar cerrado. Si vuelve en menos de 4 horas, fue un
+     corte de verdad y cuenta como siempre. */
+  function esCierreDeNoche(c) {
+    if (!c || !c.inicio) return false;
+    if (c.fin && c.fin - c.inicio < 4 * 3600e3) return false;
+    const p = partesArg(c.inicio);
+    if (p.minutos >= 12 * 60) return false;
+    const cierre = cierreDeLaMadrugadaDe(p.semana);
+    if (p.minutos >= cierre) return false;
+    if (cierre - p.minutos <= 30) return true;
+    const noche = (p.semana + 6) % 7;
+    return noche <= 3 && p.minutos >= 2 * 60;
+  }
+  // Hasta cuando cuenta como cierre: las 17 de ese mismo dia, cuando el bar
+  // vuelve a abrir. Si a esa hora sigue apagada, desde ahi si es tiempo
+  // muerto: es que abrieron y no la prendieron.
+  function finDelCierre(c) {
+    if (!esCierreDeNoche(c)) return 0;
+    const p = partesArg(c.inicio);
+    return epochArg(p.y, p.m, p.dia, HORA_ABRE * 60);
+  }
+
   // Reparte los minutos de una caida entre abierto y cerrado. Una caida
   // que empieza 23:50 y termina a las 9 de la manana tiene unos pocos
   // minutos que duelen y muchas horas que no.
   function minutosAbiertoYCerrado(c) {
     const fin = c.fin || Date.now();
     let abiertos = 0, cerrados = 0, cursor = c.inicio, vueltas = 0;
+    const fc = finDelCierre(c);
+    if (fc) {                                   // hasta que vuelve a abrir, es cierre
+      const h = Math.min(fin, fc);
+      cerrados += (h - cursor) / 60000;
+      cursor = h;
+    }
     while (cursor < fin && vueltas++ < 400) {
       const corte = Math.min(fin, siguienteCambioDeHorario(cursor));
       const dur = (corte - cursor) / 60000;
@@ -548,6 +583,45 @@ module.exports = function montarMetricas(app, ctx) {
     return e;
   }
 
+  /* ---- redes que ya no se usan ----
+     Una red vieja (Birra House Clientes) seguia apareciendo en las listas
+     de wifi por cortes de hace semanas. Se muestran solo las redes en las
+     que estuvo el Shelly en los ultimos 7 dias, y las dadas de baja nunca. */
+  const REDES_DADAS_DE_BAJA = ['birrahouseclientes'];
+  function normalRed(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+  function redEnUso(ssid) {
+    if (!ssid || REDES_DADAS_DE_BAJA.indexOf(normalRed(ssid)) >= 0) return false;
+    const limite = Date.now() - 7 * DIA;
+    return redes.some(function (r) { return r.ssid === ssid && (r.hasta || Date.now()) > limite; });
+  }
+
+  /* ---- cupones: impresos, usados y los que quedan ----
+     Un cupon "repartido" que nadie uso es indistinguible de uno que sigue
+     en la caja del bar: el sistema no lo puede saber. Por eso se cuenta lo
+     unico seguro: impresos, usados, y la resta. */
+  function resumenCupones() {
+    const cup = dCupones() || {};
+    const codigos = Object.keys(cup);
+    const usados = codigos.filter(function (k) { return cup[k] && cup[k].usado; });
+    const yaUsado = {};
+    usados.forEach(function (k) { yaUsado[k] = true; });
+    const escSinUsar = {};
+    escaneos.forEach(function (e) { if (cup[e.codigo] && !yaUsado[e.codigo]) escSinUsar[e.codigo] = true; });
+    const canjes = dCanjes();
+    const compraron = canjes.filter(function (x) { return x.conv15; }).length;
+    const recaudado = canjes.reduce(function (a, x) { return a + (x.montoConv || 0); }, 0);
+    return {
+      impresos: codigos.length,
+      usados: usados.length,
+      quedan: codigos.length - usados.length,
+      escaneadosSinUsar: Object.keys(escSinUsar).length,
+      compraron: compraron,
+      pcCompra: canjes.length ? Math.round(compraron * 100 / canjes.length) : 0,
+      recaudado: recaudado,
+      porCupon: usados.length ? Math.round(recaudado / usados.length) : 0
+    };
+  }
+
   // ---- la mejor hora, como recomendacion y no como numero suelto ----
   /* ---- cuando conviene repartir los cupones ----
      Antes esto miraba hora por hora y pedia 5 canjes en la MISMA hora para
@@ -720,7 +794,7 @@ module.exports = function montarMetricas(app, ctx) {
       if (!abiertos) continue;                      // el bar estaba cerrado
       let muerto = 0, motivo = null;
       caidas.forEach(function (c) {
-        const a = Math.max(c.inicio, desde), b = Math.min(c.fin || Date.now(), hasta);
+        const a = Math.max(c.inicio, desde, finDelCierre(c)), b = Math.min(c.fin || Date.now(), hasta);
         if (b <= a || c.incompleta) return;
         const m = minutosAbiertosDe(a, b);
         if (!m) return;
@@ -1030,101 +1104,85 @@ module.exports = function montarMetricas(app, ctx) {
         pesos(hoy.total * PORCENTAJE_BAR / 100) + '</b></div>' : '') +
       '</div>';
 
-    // --- tiempo muerto ---
+    /* --- tiempo muerto: UNA seccion, UN porcentaje ---
+       Antes habia dos secciones ("Tiempo muerto" a 7 dias y "Prendida y
+       apagada" a 30) y cada una traia su porcentaje de "pudo cobrar". Dos
+       porcentajes casi iguales que no coincidian confundian mas de lo que
+       decian. Queda uno solo, el de la semana, y los 30 dias van abajo en
+       horas y veces, sin porcentaje. */
     const perdidoSem = Math.round(tmSem.muertoAbierto * porMin);
-    h += '<div class="seccion"><h2 class="titulo">Tiempo muerto &middot; \u00faltimos 7 d\u00edas</h2>' +
+    const mes = tiempoMuerto(Date.now() - 30 * DIA, Date.now());
+    h += '<div class="seccion"><h2 class="titulo">Tiempo muerto</h2>';
+    if (tmSem.abierta) {
+      h += '<div class="alerta" style="margin-bottom:14px"><b>!</b><div>Está caída ahora mismo, hace ' +
+        duracion((Date.now() - tmSem.abierta.inicio) / 60000) + '.</div></div>';
+    }
+    const conf = tmSem.confiabilidad;
+    h += '<div class="rot">Pudo cobrar &middot; últimos 7 días</div>' +
+      '<div class="cifra chica' + (conf === null ? '' : (conf >= 97 ? ' buena' : (conf < 90 ? ' mala' : ''))) + '">' +
+      (conf === null ? '&mdash;' : conf.toFixed(1).replace('.', ',') + '%') + '</div>' +
+      '<p class="lectura tenue" style="margin-bottom:14px">del horario con el bar abierto.</p>' +
       '<div class="cuadrantes">' +
       '<div class="cua' + (tmSem.wifiAbierto ? ' duele' : ' tranqui') + '">' +
-        '<div class="et">Wifi &middot; bar abierto</div><div class="va">' + duracion(tmSem.wifiAbierto) + '</div></div>' +
+        '<div class="et">Sin wifi &middot; 7 días</div><div class="va">' + duracion(tmSem.wifiAbierto) + '</div></div>' +
       '<div class="cua' + (tmSem.apagadaAbierto ? ' duele' : ' tranqui') + '">' +
-        '<div class="et">Apagada &middot; bar abierto</div><div class="va">' + duracion(tmSem.apagadaAbierto) + '</div></div>' +
+        '<div class="et">Apagada &middot; 7 días</div><div class="va">' + duracion(tmSem.apagadaAbierto) + '</div></div>' +
       '</div>';
     if (tmSem.muertoAbierto > 0 && porMin > 0) {
-      h += '<p class="lectura">Al ritmo de las \u00faltimas noches, esos ' + duracion(tmSem.muertoAbierto) +
-        ' son aproximadamente <b>' + pesos(perdidoSem) + ' que no se cobraron</b>. Es una estimaci\u00f3n, no una cuenta exacta.</p>';
+      h += '<p class="lectura">Al ritmo de las últimas noches, esos ' + duracion(tmSem.muertoAbierto) +
+        ' son aproximadamente <b>' + pesos(perdidoSem) + ' que no se cobraron</b>. Es una estimación, no una cuenta exacta.</p>';
     } else {
       h += '<p class="lectura">Ni un minuto de cobro perdido con el bar abierto esta semana.</p>';
     }
-    if (tmSem.confiabilidad !== null) {
-      h += '<div class="reparto" style="margin-top:12px"><span>Pudo cobrar</span><b>' +
-        tmSem.confiabilidad.toFixed(1) + '% del horario abierto</b></div>';
-    }
-    h += '<div class="reparto"><span>Hoy, con el bar abierto</span><b>' + duracion(tmHoy.muertoAbierto) + '</b></div>' +
-      '<div class="reparto"><span>Con el bar cerrado (no afecta)</span><b>' +
-      duracion(tmSem.wifiCerrado + tmSem.apagadaCerrado) + '</b></div>';
-    if (tmSem.abierta) {
-      h += '<div class="alerta" style="margin-top:12px"><b>!</b><div>Est\u00e1 ca\u00edda ahora mismo, hace ' +
-        duracion((Date.now() - tmSem.abierta.inicio) / 60000) + '.</div></div>';
-    }
+    h += '<div class="reparto" style="margin-top:12px"><span>Hoy, con el bar abierto</span><b>' + duracion(tmHoy.muertoAbierto) + '</b></div>';
+    h += '<div class="rot" style="margin-top:18px">Últimos 30 días</div>' +
+      '<div class="reparto"><span>Apagada con el bar abierto</span><b>' + duracion(mes.apagadaAbierto) + '</b></div>' +
+      '<div class="reparto"><span>Sin wifi con el bar abierto</span><b>' + duracion(mes.wifiAbierto) + '</b></div>' +
+      '<div class="reparto"><span>Abrió el bar y no estaba</span><b>' + mes.aperturasFallidas.length +
+        (mes.aperturasFallidas.length === 1 ? ' noche' : ' noches') + '</b></div>' +
+      '<div class="reparto"><span>Se apagó en plena noche</span><b>' + mes.apagadasAnticipadas.length +
+        (mes.apagadasAnticipadas.length === 1 ? ' vez' : ' veces') + '</b></div>';
+    h += '<p class="lectura">' +
+      (mes.apagadaAbierto > mes.wifiAbierto
+        ? 'Se pierde más tiempo por máquina apagada que por wifi: el arreglo es de rutina del bar, no de red.'
+        : (mes.wifiAbierto > 0
+          ? 'Se pierde más tiempo por wifi que por apagados: el arreglo es de red.'
+          : 'No se perdió tiempo con el bar abierto en estos 30 días.')) + '</p>' +
+      '<p class="lectura tenue">El apagado de cierre no cuenta: de domingo a miércoles, apagarla después de las 2 es que cerraron.</p>';
     h += '</div>';
 
     // --- wifi ---
-    h += '<div class="seccion"><h2 class="titulo">Wifi de la m\u00e1quina</h2>';
+    /* Solo las redes que el Shelly usó esta semana. Las viejas (Birra
+       House Clientes) seguian apareciendo por cortes de hace semanas. */
+    h += '<div class="seccion"><h2 class="titulo">Wifi de la máquina</h2>';
     if (redes.length) {
       const ult = redes[redes.length - 1];
       h += '<div class="rot">Conectada a</div><div class="cifra texto">' + esc(ult.ssid) + '</div>' +
         '<p class="lectura tenue">Desde el ' + new Date(ult.desde).toLocaleString('es-AR',
           { timeZone: TZ, hour12: false, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) +
-        (ult.rssi ? ' &middot; se\u00f1al ' + ult.rssi + ' dBm' : '') + '.</p>';
-      const claves = Object.keys(redes30);
+        (ult.rssi ? ' &middot; señal ' + ult.rssi + ' dBm' : '') + '.</p>';
+      const claves = Object.keys(redes30).filter(redEnUso);
       if (claves.length) {
         h += '<div style="margin-top:14px">';
         claves.sort(function (a, b) { return redes30[b].cortes - redes30[a].cortes; }).forEach(function (k) {
           h += '<div class="reparto"><span>' + esc(k) + '</span><b>' + redes30[k].cortes +
             (redes30[k].cortes === 1 ? ' corte' : ' cortes') + ' &middot; ' + duracion(redes30[k].minutos) + '</b></div>';
         });
-        h += '</div><p class="lectura">Cortes de wifi de los \u00faltimos 30 d\u00edas, separados por la red en la que estaba la m\u00e1quina en ese momento. Con dos semanas de datos ya se puede decidir si conviene cambiarla de red.</p>';
+        h += '</div><p class="lectura">Cortes de wifi de los últimos 30 días, separados por la red en la que estaba la máquina en ese momento.</p>';
       } else {
-        h += '<p class="lectura">Todav\u00eda no hubo cortes de wifi registrados con red conocida.</p>';
+        h += '<p class="lectura">No hubo cortes de wifi en las redes que usa ahora.</p>';
       }
     } else {
-      h += '<p class="lectura tenue">Todav\u00eda no lleg\u00f3 ning\u00fan dato de red. Aparece la primera vez que el Shelly informe en qu\u00e9 wifi est\u00e1.</p>';
+      h += '<p class="lectura tenue">Todavía no llegó ningún dato de red. Aparece la primera vez que el Shelly informe en qué wifi está.</p>';
     }
     h += '</div>';
-
-    /* --- prendida o apagada ---
-       Sale de la MISMA cuenta que usa el panel de /admin (tiempoMuerto), a
-       proposito: dos pantallas que calculan lo mismo por caminos distintos
-       tarde o temprano dicen numeros distintos, y ahi ya no se le cree a
-       ninguna. Lo que agrega aca es el corte largo: 30 dias en vez de 7, y
-       la division entre "la apagaron" y "se cayo el wifi", que son dos
-       problemas con dos soluciones distintas. */
-    const mes = tiempoMuerto(Date.now() - 30 * DIA, Date.now());
-    h += '<div class="seccion"><h2 class="titulo">Prendida y apagada &middot; 30 d\u00edas</h2>' +
-      '<div class="cuadrantes">' +
-      '<div class="cua' + (mes.apagadaAbierto > 60 ? ' duele' : ' tranqui') + '">' +
-      '<div class="et">Apagada con el bar abierto</div><div class="va">' +
-        duracion(mes.apagadaAbierto) + '</div></div>' +
-      '<div class="cua' + (mes.wifiAbierto > 60 ? ' duele' : ' tranqui') + '">' +
-      '<div class="et">Sin wifi con el bar abierto</div><div class="va">' +
-        duracion(mes.wifiAbierto) + '</div></div>' +
-      '<div class="cua' + (mes.aperturasFallidas.length ? ' duele' : ' tranqui') + '">' +
-      '<div class="et">Abri\u00f3 el bar y no estaba</div><div class="va">' +
-        mes.aperturasFallidas.length + (mes.aperturasFallidas.length === 1 ? ' noche' : ' noches') +
-        '</div></div>' +
-      '<div class="cua' + (mes.apagadasAnticipadas.length ? ' duele' : ' tranqui') + '">' +
-      '<div class="et">Se apag\u00f3 en plena noche</div><div class="va">' +
-        mes.apagadasAnticipadas.length + (mes.apagadasAnticipadas.length === 1 ? ' vez' : ' veces') +
-        '</div></div>' +
-      '</div>';
-    if (mes.confiabilidad !== null) {
-      h += '<div class="reparto" style="margin-top:12px"><span>Estuvo cobrando</span><b>' +
-        mes.confiabilidad.toFixed(1).replace('.', ',') + '% del tiempo que el bar estuvo abierto</b></div>';
-    }
-    h += '<p class="lectura">' +
-      (mes.apagadaAbierto > mes.wifiAbierto
-        ? 'Se pierde m\u00e1s tiempo por m\u00e1quina apagada que por wifi: el arreglo es de rutina del bar, no de red.'
-        : (mes.wifiAbierto > 0
-          ? 'Se pierde m\u00e1s tiempo por wifi que por apagados: el arreglo es de red. Abajo est\u00e1 cu\u00e1l aguanta mejor.'
-          : 'No se perdi\u00f3 tiempo con el bar abierto en estos 30 d\u00edas.')) +
-      ' Es la misma cuenta del panel, pero en 30 d\u00edas en vez de 7.</p></div>';
 
     /* --- que red rinde mas ---
        Contar cortes no alcanza para decidir: una red puede cortarse poco y
        estar puesta una hora, y otra cortarse mas pero haber aguantado veinte
        noches. Lo que se compara es el porcentaje de tiempo muerto sobre el
        tiempo que cada red estuvo realmente puesta, con el bar abierto. */
-    const rend = rendimientoPorRed(30);
+    const rend = rendimientoPorRed(30).filter(function (r) { return redEnUso(r.red); });
     if (rend.length && rend.some(function (r) { return r.minutos > 30; })) {
       h += '<div class="seccion"><h2 class="titulo">Qu\u00e9 red aguanta mejor &middot; 30 d\u00edas</h2>';
       rend.forEach(function (r) {
@@ -1220,6 +1278,15 @@ module.exports = function montarMetricas(app, ctx) {
     }
     h += '<div class="reparto" style="margin-top:14px"><span>Pi\u00f1as en 7 d\u00edas</span><b>' + tvSem.pinas +
       ' &middot; ' + tvSem.personas + ' personas</b></div>';
+    /* Las fotos del display tienen UNA pantalla, /fotos: ahi se ven todas,
+       se abren grandes y se ocultan. Antes habia una tira aca y otra alla. */
+    const sinFotoHoy = pinasDe(nocheHoy()).filter(function (p) { return !p.foto; }).length;
+    if (sinFotoHoy) {
+      h += '<div class="alerta medio" style="margin-top:12px"><b>!</b><div>' + sinFotoHoy +
+        (sinFotoHoy === 1 ? ' pi\u00f1a entr\u00f3 sin foto' : ' pi\u00f1as entraron sin foto') +
+        ' esta noche. Sin foto no hay con qu\u00e9 comprobar el puntaje.</div></div>';
+    }
+    h += '<div class="botones"><a class="b ancho" href="/fotos' + c + '">Fotos del display</a></div>';
     h += '</div>';
 
     /* --- las fotos del display ---
@@ -1233,37 +1300,6 @@ module.exports = function montarMetricas(app, ctx) {
       '<p class="lectura">Lo mismo que est\u00e1 saliendo en la tele ahora, en la pantalla del ' +
       'celular y en 9:16: lo que grabes ya sale con la medida de una historia.</p>' +
       '<div class="botones"><a class="b ancho on" href="/vivo' + c + '">VER EN VIVO</a></div></div>';
-
-    const fotoHoy = fotosDe(nocheHoy());
-    const fotoLista = fotoHoy.length ? fotoHoy : ultimasFotos(12);
-    h += '<div class="seccion"><h2 class="titulo">Fotos del display</h2>';
-    if (fotoLista.length) {
-      h += '<div class="tira">';
-      fotoLista.slice(0, 24).forEach(function (p) {
-        const hora = new Date(p.ts).toLocaleString('es-AR', { timeZone: TZ, hour12: false,
-          hour: '2-digit', minute: '2-digit' });
-        h += '<a class="pic' + (p.oculta ? ' oculta' : '') + '" target="_blank" rel="noopener" href="' +
-          fotoURL(p.foto) + '">' +
-          '<img loading="lazy" src="' + fotoURL(p.foto) + '" alt="">' +
-          '<div class="cap"><b>' + (p.score || 0) + '</b>' +
-          '<span>' + esc(String(p.apodo || '').slice(0, 12)) + '<br>' + hora +
-          (p.oculta ? ' &middot; oculta' : '') + '</span></div></a>';
-      });
-      h += '</div>';
-      h += '<p class="lectura tenue">' +
-        (fotoHoy.length ? 'Las de esta noche. ' : 'Esta noche todav\u00eda no hay: estas son las \u00faltimas. ') +
-        'Toc\u00e1 una para verla grande. Si un puntaje no coincide con su foto, se saca del ranking desde ' +
-        '<a href="/fotos?clave=' + encodeURIComponent(CLAVE) + '" style="color:var(--led)">la pantalla de pi\u00f1as</a>.</p>';
-      const sinFoto = (fotoHoy.length ? pinasDe(nocheHoy()) : []).filter(function (p) { return !p.foto; }).length;
-      if (sinFoto) {
-        h += '<div class="alerta medio" style="margin-top:12px"><b>!</b><div>' + sinFoto +
-          (sinFoto === 1 ? ' pi\u00f1a entr\u00f3 sin foto' : ' pi\u00f1as entraron sin foto') +
-          '. Sin foto no hay con qu\u00e9 comprobar el puntaje.</div></div>';
-      }
-    } else {
-      h += '<p class="lectura tenue">Todav\u00eda no carg\u00f3 nadie una foto del display.</p>';
-    }
-    h += '</div>';
 
     // --- premios de la ruleta, con lo que falta entregar ---
     h += '<div class="seccion"><h2 class="titulo">Premios de la ruleta</h2>';
@@ -1289,35 +1325,44 @@ module.exports = function montarMetricas(app, ctx) {
     h += '</div>';
 
     // --- cupones ---
-    h += '<div class="seccion"><h2 class="titulo">Cupones &middot; \u00faltimos 30 d\u00edas</h2>';
-    if (emb.repartidos) {
-      const maxE = Math.max(emb.repartidos, 1);
-      const paso = function (nom, val, pct) {
-        return '<div class="paso"><span class="nom">' + nom + '</span>' +
-          '<span class="barra"><i style="width:' + Math.round(val * 100 / maxE) + '%"></i></span>' +
-          '<span class="num">' + val + (pct === null ? '' : ' &middot; ' + pct + '%') + '</span></div>';
-      };
-      h += '<div class="embudo">' +
-        paso('Repartidos', emb.repartidos, null) +
-        paso('Escaneados', emb.escaneados, emb.pcEscaneo) +
-        paso('Activados', emb.activados, emb.pcActivacion) +
-        paso('Compraron', emb.compraron, emb.pcCompra) +
-        '</div>';
-      if (emb.diagnostico) h += '<p class="lectura">' + esc(emb.diagnostico) + '</p>';
-      if (emb.recaudado) h += '<div class="reparto" style="margin-top:10px"><span>Plata que trajeron</span><b>' + pesos(emb.recaudado) + '</b></div>';
+    /* El lote es de 72 cupones impresos que se le dieron al bar para que
+       los reparta. Antes el panel los contaba como "repartidos" y media los
+       escaneos contra 72: parecía que la gente no los usaba, cuando en
+       realidad la mayoria todavía no salio de la caja. Lo unico que se
+       sabe con certeza es cuántos se usaron: esos son los repartidos. */
+    const cu = resumenCupones();
+    h += '<div class="seccion"><h2 class="titulo">Cupones</h2>';
+    if (cu.impresos) {
+      h += '<div class="cuadrantes">' +
+        '<div class="cua"><div class="et">Ya se usaron</div><div class="va">' + cu.usados + '</div></div>' +
+        '<div class="cua"><div class="et">Quedan por repartir</div><div class="va">' + cu.quedan + '</div></div>' +
+        '</div>' +
+        '<div class="paso" style="margin:6px 0 4px"><span class="barra"><i style="width:' +
+          Math.round(cu.usados * 100 / Math.max(cu.impresos, 1)) + '%"></i></span>' +
+          '<span class="num">' + cu.usados + ' de ' + cu.impresos + '</span></div>' +
+        '<p class="lectura tenue">' + cu.impresos + ' impresos en total. Un cupón cuenta como repartido cuando alguien lo usó.</p>';
+      if (cu.usados) {
+        h += '<div class="reparto" style="margin-top:12px"><span>Compraron después (15 min)</span><b>' +
+            cu.compraron + ' de ' + cu.usados + ' &middot; ' + cu.pcCompra + '%</b></div>' +
+          '<div class="reparto"><span>Plata que trajeron</span><b>' + pesos(cu.recaudado) + '</b></div>' +
+          '<div class="reparto"><span>Por cupón usado</span><b>' + pesos(cu.porCupon) + '</b></div>';
+      }
+      if (cu.escaneadosSinUsar) {
+        h += '<div class="reparto"><span>Lo escanearon y no lo usaron</span><b>' + cu.escaneadosSinUsar + '</b></div>';
+      }
       /* Las tres franjas, con su conversion al lado: se entiende de un
          vistazo cual rinde y cual no, incluso con pocos datos. */
-      h += '<div class="rot" style="margin-top:16px">Cu\u00e1ndo conviene repartirlos</div>';
+      h += '<div class="rot" style="margin-top:16px">Cuándo conviene repartirlos</div>';
       mej.filas.forEach(function (f) {
         const flojo = f.canjes < MINIMO_FRANJA;
         h += '<div class="reparto"' + (flojo ? ' style="opacity:.55"' : '') + '><span>' + esc(f.nom) + '</span><b>' +
-          (f.canjes ? f.canjes + (f.canjes === 1 ? ' canje &middot; ' : ' canjes &middot; ') +
-                      f.conv + (f.conv === 1 ? ' compr\u00f3' : ' compraron') + ' (' + f.pc + '%)'
-                    : 'sin canjes') + '</b></div>';
+          (f.canjes ? f.canjes + (f.canjes === 1 ? ' usado &middot; ' : ' usados &middot; ') +
+                      f.conv + (f.conv === 1 ? ' compró' : ' compraron') + ' (' + f.pc + '%)'
+                    : 'sin usar') + '</b></div>';
       });
       h += '<p class="lectura' + (mej.hay ? '' : ' tenue') + '">' + mej.texto + '</p>';
     } else {
-      h += '<p class="lectura tenue">Todav\u00eda no hay cupones cargados.</p>';
+      h += '<p class="lectura tenue">Todavía no hay cupones cargados.</p>';
     }
     h += '<div class="botones"><a class="b ancho" href="/cupones' + c + '">Administrar cupones</a></div></div>';
 
@@ -1360,7 +1405,18 @@ module.exports = function montarMetricas(app, ctx) {
       h += '<p class="lectura tenue">Quedan ' + pt.sinMarcar +
         ' noches sin marcar como normal o evento. Marcalas abajo: es lo que separa el piso del techo.</p>';
     }
-    h += '<div class="botones"><a class="b ancho" href="/noches' + c + '">Marcar noches normal / evento</a>' +
+    const mesesIng = ingresosPorMes();
+    const mesAhora = nocheHoy().slice(0, 7);
+    const mEste = mesesIng.filter(function (m) { return m.mes === mesAhora; })[0];
+    const mAntes = mesesIng.filter(function (m) { return m.mes < mesAhora; }).slice(-1)[0];
+    h += '<div class="rot" style="margin-top:18px">Por mes &middot; QR + efectivo</div>' +
+      '<div class="reparto"><span>' + nombreMes(mesAhora) + ' (en curso)</span><b>' + pesos(mEste ? mEste.total : 0) +
+        (mEste && mEste.pendiente ? ' + efectivo' : '') + '</b></div>' +
+      (mAntes ? '<div class="reparto"><span>' + nombreMes(mAntes.mes) + '</span><b>' + pesos(mAntes.total) + '</b></div>' : '') +
+      '<div class="reparto"><span>Hist\u00f3rico</span><b>' +
+        pesos(mesesIng.reduce(function (s, m) { return s + m.total; }, 0)) + '</b></div>';
+    h += '<div class="botones"><a class="b ancho on" href="/ingresos' + c + '">Ingresos mes por mes</a>' +
+      '<a class="b ancho" href="/noches' + c + '">Marcar noches normal / evento</a>' +
       '<a class="b" href="/admin' + c + '">Panel de siempre</a>' +
       '<a class="b" href="/inversion' + c + '">Vista para mostrar</a></div></div>';
 
@@ -1583,6 +1639,409 @@ module.exports = function montarMetricas(app, ctx) {
     res.type('text/html').send(h);
   });
 
+  // ============================================================
+  // 7. INGRESOS POR MES: QR + EFECTIVO + LOS MESES DE ANTES
+  // ------------------------------------------------------------
+  // El sistema solo ve el QR. El billetero se cuenta a mano cuando se
+  // vacia, y los meses de antes del sistema no estan en ningun lado. Las
+  // tres cosas juntas dan el numero de verdad:
+  //  - meses cargados a mano: el total del mes (QR + efectivo) tal como lo
+  //    informo Fausto. Si un mes tiene total cargado, manda ese.
+  //  - recaudaciones del billetero: la plata contada y las noches que
+  //    cubre. Se reparte entre esas noches en proporcion a lo que entro por
+  //    QR cada noche (donde hubo mas gente, hubo mas billetes). El reparto
+  //    por noche es estimado; el total es exacto.
+  //  - el QR de cada noche, que lo cuenta el sistema solo.
+  // ============================================================
+  const F_CAJA = path.join(DATA_DIR, 'caja.json');
+  // Lo que informo Fausto: total del mes, QR + efectivo, desde que arranco (dic 2025).
+  // Septiembre: 1,3 M aproximado, segun Fausto. Se editan desde /ingresos.
+  const MESES_INICIALES = {
+    '2025-12': 1800000,
+    '2026-01': 2300000, '2026-02': 2300000, '2026-03': 1500000,
+    '2026-04': 700000,  '2026-05': 900000,  '2026-06': 1000000,
+    '2026-07': 1100000, '2026-08': 850000,  '2026-09': 1300000
+  };
+  // La ultima vez que se vacio el billetero antes de que existiera esto.
+  const PRIMERA_NOCHE_SIN_CONTAR = '2026-09-13';
+
+  let caja = leer(F_CAJA, null);
+  if (!caja || typeof caja !== 'object') {
+    caja = { meses: Object.assign({}, MESES_INICIALES), efectivo: [], creado: Date.now() };
+    guardar(F_CAJA, caja);
+  }
+  if (!caja.meses || typeof caja.meses !== 'object') caja.meses = {};
+  if (!Array.isArray(caja.efectivo)) caja.efectivo = [];
+
+  const MESES_NOMBRE = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio',
+                        'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  function nombreMes(k, corto) {
+    const p = String(k).split('-');
+    const n = MESES_NOMBRE[Number(p[1]) - 1] || k;
+    return corto ? n.slice(0, 3) + ' ' + p[0].slice(2) : n + ' ' + p[0];
+  }
+  function fechaCorta(noche) {
+    const p = String(noche).split('-');
+    return p[2] + '/' + p[1];
+  }
+  function esNoche(t) { return /^\d{4}-\d{2}-\d{2}$/.test(String(t || '')); }
+  function esMes(t) { return /^\d{4}-(0[1-9]|1[0-2])$/.test(String(t || '')); }
+  function sumarNoche(noche, n) {
+    const p = noche.split('-').map(Number);
+    const d = new Date(Date.UTC(p[0], p[1] - 1, p[2] + n));
+    return d.toISOString().slice(0, 10);
+  }
+  function nochesEntre(desde, hasta) {
+    const out = [];
+    for (let n = desde, i = 0; n <= hasta && i < 400; n = sumarNoche(n, 1), i++) out.push(n);
+    return out;
+  }
+  // "1.300.000", "$ 1300000", "1300000,50" -> 1300000
+  function leerPesos(t) {
+    const s = String(t || '').replace(/,\d{1,2}$/, '').replace(/[^\d]/g, '');
+    const n = Number(s);
+    return (s && n > 0 && n < 1e10) ? n : 0;
+  }
+
+  // La ultima noche cuyo efectivo ya se conto.
+  function ultimaNocheContada() {
+    let u = sumarNoche(PRIMERA_NOCHE_SIN_CONTAR, -1);
+    caja.efectivo.forEach(function (e) { if (e.hasta > u) u = e.hasta; });
+    return u;
+  }
+
+  function qrPorNoche() {
+    const qr = {};
+    historico().forEach(function (j) { if (j.noche) qr[j.noche] = (j.total || 0); });
+    return qr;
+  }
+
+  function repartoEfectivo(e, qr) {
+    const noches = nochesEntre(e.desde, e.hasta);
+    const suma = noches.reduce(function (a, n) { return a + (qr[n] || 0); }, 0);
+    const porMes = {};
+    noches.forEach(function (n) {
+      const peso = suma > 0 ? (qr[n] || 0) / suma : 1 / noches.length;
+      const k = n.slice(0, 7);
+      porMes[k] = (porMes[k] || 0) + e.monto * peso;
+    });
+    return porMes;
+  }
+
+  function ingresosPorMes() {
+    const qr = qrPorNoche();
+    const meses = {};
+    const tocar = function (k) {
+      if (!meses[k]) meses[k] = { mes: k, qr: 0, efectivo: 0, noches: 0, fichas: 0, cargado: null, pendiente: false };
+      return meses[k];
+    };
+    const contada = ultimaNocheContada();
+    historico().forEach(function (j) {
+      if (!j.noche) return;
+      const m = tocar(j.noche.slice(0, 7));
+      m.qr += j.total || 0;
+      m.fichas += j.fichas || 0;
+      if ((j.total || 0) > 0) {
+        m.noches++;
+        if (j.noche > contada) m.pendiente = true;     // hay noches con billetero sin contar
+      }
+    });
+    caja.efectivo.forEach(function (e) {
+      const r = repartoEfectivo(e, qr);
+      Object.keys(r).forEach(function (k) { tocar(k).efectivo += r[k]; });
+    });
+    Object.keys(caja.meses).forEach(function (k) {
+      if (esMes(k)) tocar(k).cargado = Number(caja.meses[k]) || 0;
+    });
+    return Object.keys(meses).sort().map(function (k) {
+      const m = meses[k];
+      m.qr = Math.round(m.qr);
+      m.efectivo = Math.round(m.efectivo);
+      m.sistema = m.qr + m.efectivo;
+      m.total = m.cargado !== null ? m.cargado : m.sistema;
+      m.pendiente = m.cargado === null && m.pendiente;
+      m.paraBar = Math.round(m.total * PORCENTAJE_BAR / 100);
+      return m;
+    });
+  }
+
+  // Lo que entro por QR en las noches cuyo billetero todavia no se conto.
+  function sinContar() {
+    const desde = sumarNoche(ultimaNocheContada(), 1);
+    const h = historico().filter(function (j) { return j.noche >= desde && (j.total || 0) > 0; });
+    return {
+      desde: desde,
+      noches: h.length,
+      qr: h.reduce(function (a, j) { return a + (j.total || 0); }, 0)
+    };
+  }
+
+  const ESTILOS_INGRESOS =
+    '.meses{display:flex;align-items:flex-end;gap:5px;height:150px;margin:26px 0 6px}' +
+    '.meses .m{flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;position:relative}' +
+    '.meses .m i{display:block;background:var(--cuero);border-radius:4px 4px 0 0;min-height:2px}' +
+    '.meses .m.cargado i{background:repeating-linear-gradient(135deg,var(--cuero) 0 5px,#5E2424 5px 8px)}' +
+    '.meses .m.ahora i{background:var(--led);opacity:.75}' +
+    '.meses .m b{position:absolute;left:50%;transform:translateX(-50%);white-space:nowrap;' +
+    'font-family:"Share Tech Mono",monospace;font-size:10.5px;font-weight:400;color:var(--hueso)}' +
+    '.meses-et{display:flex;gap:5px;font-family:"Share Tech Mono",monospace;font-size:10px;color:var(--tenue);margin-bottom:6px}' +
+    '.meses-et span{flex:1;text-align:center}' +
+    '.ley{display:flex;gap:14px;flex-wrap:wrap;font-family:"Share Tech Mono",monospace;font-size:11px;color:var(--tenue);margin:8px 0 4px}' +
+    '.ley i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;background:var(--cuero)}' +
+    '.ley i.c{background:repeating-linear-gradient(135deg,var(--cuero) 0 3px,#5E2424 3px 5px)}' +
+    '.ley i.a{background:var(--led);opacity:.75}' +
+    '.tabla td small{display:block;color:var(--tenue);font-size:10.5px;margin-top:2px}' +
+    '.form{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px}' +
+    '.form label{display:block;font-family:"Share Tech Mono",monospace;font-size:10.5px;letter-spacing:.1em;' +
+    'text-transform:uppercase;color:var(--tenue)}' +
+    '.form input{width:100%;margin-top:4px;padding:11px 10px;background:var(--sup);border:1px solid var(--borde);' +
+    'border-radius:7px;color:var(--hueso);font-size:16px;font-family:"Share Tech Mono",monospace}' +
+    '.form .ancho{grid-column:1/-1}' +
+    '.form button,.mini button{padding:13px 8px;border-radius:8px;border:1px solid var(--cuero);background:var(--cuero);' +
+    'color:var(--hueso);font-size:14px;cursor:pointer}' +
+    '.mini{display:flex;gap:7px;align-items:center;margin:0}' +
+    '.mini input{width:130px;padding:8px;background:var(--sup);border:1px solid var(--borde);border-radius:6px;' +
+    'color:var(--hueso);font-size:15px;font-family:"Share Tech Mono",monospace}' +
+    '.mini button{padding:8px 10px;font-size:12px}' +
+    '.mini button.borrar{background:transparent;border-color:var(--borde);color:var(--tenue)}' +
+    '.ok-msg{background:#173222;border-left:3px solid var(--ok);padding:10px 13px;font-size:14px;margin:14px 18px 0;border-radius:0 6px 6px 0}';
+
+  app.get('/ingresos', function (req, res) {
+    if (!claveOk(req)) return res.status(403).send('clave invalida');
+    cerrarJornadasPendientes();
+    const meses = ingresosPorMes();
+    const ahora = nocheHoy().slice(0, 7);
+    const esteMes = meses.filter(function (m) { return m.mes === ahora; })[0] ||
+      { mes: ahora, qr: 0, efectivo: 0, total: 0, cargado: null, pendiente: false, paraBar: 0, noches: 0 };
+    const pasados = meses.filter(function (m) { return m.mes < ahora; });
+    const historicoTotal = meses.reduce(function (a, m) { return a + m.total; }, 0);
+    const pendiente = sinContar();
+    const ok = String(req.query.ok || '');
+
+    let h = cabeza('BPK ingresos', 'ingresos &middot; qr + efectivo &middot; ' +
+      new Date().toLocaleString('es-AR', { timeZone: TZ, hour12: false }));
+    h = h.replace('</style>', ESTILOS_INGRESOS + '</style>');
+    if (ok) h += '<div class="ok-msg">' + esc(ok) + '</div>';
+
+    // --- este mes ---
+    h += '<div class="seccion"><h2 class="titulo">Este mes &middot; ' + nombreMes(ahora) + '</h2>' +
+      '<div class="cifra">' + pesos(esteMes.total) + '</div>';
+    if (esteMes.cargado !== null) {
+      h += '<p class="lectura">Total cargado a mano.</p>';
+    } else {
+      h += '<p class="lectura">' + pesos(esteMes.qr) + ' por QR' +
+        (esteMes.efectivo ? ' + ' + pesos(esteMes.efectivo) + ' de efectivo' : '') +
+        ', en ' + esteMes.noches + (esteMes.noches === 1 ? ' noche' : ' noches') + '.</p>';
+      if (esteMes.pendiente) {
+        h += '<p class="lectura tenue">Todavía no está sumado todo el efectivo del billetero: se suma cuando lo contás (abajo).</p>';
+      }
+    }
+    h += '<div class="reparto" style="margin-top:12px"><span>Le toca al bar (' + PORCENTAJE_BAR + '%)</span><b>' +
+      pesos(esteMes.paraBar) + '</b></div>' +
+      '<div class="reparto"><span>Te queda a vos</span><b>' + pesos(esteMes.total - esteMes.paraBar) + '</b></div></div>';
+
+    // --- historico ---
+    const mejor = pasados.slice().sort(function (a, b) { return b.total - a.total; })[0];
+    const promedio = pasados.length ? pasados.reduce(function (a, m) { return a + m.total; }, 0) / pasados.length : 0;
+    h += '<div class="seccion"><h2 class="titulo">Histórico</h2>' +
+      '<div class="cifra chica">' + pesos(historicoTotal) + '</div>' +
+      '<p class="lectura">' + (meses.length ? 'Desde ' + nombreMes(meses[0].mes) + ', ' + meses.length +
+        (meses.length === 1 ? ' mes' : ' meses') + ' contando este.' : 'Todavía no hay meses.') + '</p>' +
+      '<div class="reparto" style="margin-top:12px"><span>Le tocó al bar</span><b>' +
+        pesos(meses.reduce(function (a, m) { return a + m.paraBar; }, 0)) + '</b></div>' +
+      '<div class="reparto"><span>Te quedó a vos</span><b>' +
+        pesos(meses.reduce(function (a, m) { return a + m.total - m.paraBar; }, 0)) + '</b></div>' +
+      (pasados.length ? '<div class="reparto"><span>Promedio por mes cerrado</span><b>' + pesos(promedio) + '</b></div>' : '') +
+      (mejor ? '<div class="reparto"><span>Mejor mes</span><b>' + nombreMes(mejor.mes) + ' &middot; ' + pesos(mejor.total) + '</b></div>' : '') +
+      '</div>';
+
+    // --- mes por mes: barras + tabla ---
+    h += '<div class="seccion"><h2 class="titulo">Mes por mes</h2>';
+    if (meses.length) {
+      const ult = meses.slice(-12);
+      const tope = Math.max.apply(null, ult.map(function (m) { return m.total; }).concat([1]));
+      const masAlto = ult.slice().sort(function (a, b) { return b.total - a.total; })[0];
+      const cortito = function (n) {
+        return n >= 1e6 ? '$' + (n / 1e6).toFixed(1).replace('.', ',') + 'M' : '$' + Math.round(n / 1000) + 'k';
+      };
+      h += '<div class="meses" role="img" aria-label="Ingresos por mes">';
+      ult.forEach(function (m) {
+        const alto = Math.max(2, Math.round(m.total * 100 / tope));
+        const etiqueta = (m === masAlto || m.mes === ahora) ? '<b style="bottom:calc(' + alto + '% + 4px)">' + cortito(m.total) + '</b>' : '';
+        h += '<div class="m' + (m.cargado !== null ? ' cargado' : '') + (m.mes === ahora ? ' ahora' : '') +
+          '" title="' + esc(nombreMes(m.mes) + ': ' + pesos(m.total)) + '">' + etiqueta +
+          '<i style="height:' + alto + '%"></i></div>';
+      });
+      h += '</div><div class="meses-et">';
+      ult.forEach(function (m) { h += '<span>' + nombreMes(m.mes, true).split(' ')[0] + '</span>'; });
+      h += '</div>' +
+        '<div class="ley"><span><i></i>QR + efectivo del sistema</span><span><i class="c"></i>cargado a mano</span>' +
+        '<span><i class="a"></i>mes en curso</span></div>';
+
+      h += '<table class="tabla" style="margin-top:14px"><tr><td class="tenue">Mes</td><td class="der tenue">Total</td>' +
+        '<td class="der tenue">Bar</td><td class="der tenue">Vos</td></tr>';
+      meses.slice().reverse().forEach(function (m) {
+        const detalle = m.cargado !== null
+          ? 'cargado a mano' + (m.sistema ? ' &middot; sistema ' + pesos(m.sistema) : '')
+          : 'QR ' + pesos(m.qr) + (m.efectivo ? ' + efectivo ' + pesos(m.efectivo) : '') +
+            (m.pendiente ? ' &middot; falta efectivo' : '');
+        h += '<tr><td>' + nombreMes(m.mes, true) + '<small>' + detalle + '</small></td>' +
+          '<td class="der">' + pesos(m.total) + '</td>' +
+          '<td class="der tenue">' + pesos(m.paraBar) + '</td>' +
+          '<td class="der">' + pesos(m.total - m.paraBar) + '</td></tr>';
+      });
+      h += '</table>';
+    } else {
+      h += '<p class="lectura tenue">Todavía no hay ingresos registrados.</p>';
+    }
+    h += '</div>';
+
+    // --- efectivo del billetero ---
+    const accion = function (ruta) { return ruta + c; };
+    const hastaDef = nocheDe(Date.now() - 12 * 3600e3);
+    h += '<div class="seccion"><h2 class="titulo">Efectivo del billetero</h2>';
+    if (pendiente.noches) {
+      h += '<div class="alerta medio"><b>$</b><div>Sin contar desde la noche del <b>' + fechaCorta(pendiente.desde) +
+        '</b>: ' + pendiente.noches + (pendiente.noches === 1 ? ' noche' : ' noches') + ' con movimiento (por QR entraron ' +
+        pesos(pendiente.qr) + ' en ese lapso).</div></div>';
+    }
+    h += '<p class="lectura">Cuando vacíes el billetero, cargá lo que contaste y qué noches cubre. ' +
+      'Se reparte entre esas noches según lo que entró por QR cada una, y se suma a su mes.</p>' +
+      '<form class="form" method="post" action="' + accion('/ingresos/efectivo') + '">' +
+      '<label class="ancho">Plata contada<input name="monto" inputmode="numeric" placeholder="$ 0" required></label>' +
+      '<label>Desde la noche del<input type="date" name="desde" value="' + pendiente.desde + '" required></label>' +
+      '<label>Hasta la noche del<input type="date" name="hasta" value="' + (hastaDef >= pendiente.desde ? hastaDef : pendiente.desde) + '" required></label>' +
+      '<label class="ancho">Nota (opcional)<input name="nota" maxlength="80" placeholder="lo contó Aldana, faltó un billete…"></label>' +
+      '<button class="ancho" type="submit">Guardar recaudación</button></form>';
+    if (caja.efectivo.length) {
+      h += '<div class="rot" style="margin-top:20px">Recaudaciones cargadas</div>';
+      caja.efectivo.slice().sort(function (a, b) { return b.hasta < a.hasta ? -1 : 1; }).forEach(function (e) {
+        h += '<div class="reparto"><span>' + fechaCorta(e.desde) + ' al ' + fechaCorta(e.hasta) +
+          (e.nota ? ' &middot; ' + esc(e.nota) : '') + '</span><b>' + pesos(e.monto) + '</b></div>' +
+          '<form class="mini" method="post" action="' + accion('/ingresos/efectivo/borrar') + '" ' +
+          'onsubmit="return confirm(\'¿Borrar esta recaudación?\')">' +
+          '<input type="hidden" name="id" value="' + esc(e.id) + '">' +
+          '<button class="borrar" type="submit">borrar</button></form>';
+      });
+    }
+    h += '</div>';
+
+    // --- meses cargados a mano ---
+    const cargados = Object.keys(caja.meses).filter(esMes).sort().reverse();
+    h += '<div class="seccion"><h2 class="titulo">Meses cargados a mano</h2>' +
+      '<p class="lectura">Para los meses de antes del sistema, o cuando tenés el número exacto del mes (QR + efectivo). ' +
+      'Si un mes tiene total cargado, manda ese. Borralo y vuelve a usar el del sistema.</p>';
+    cargados.forEach(function (k) {
+      h += '<div class="reparto" style="align-items:center"><span>' + nombreMes(k) + '</span>' +
+        '<form class="mini" method="post" action="' + accion('/ingresos/mes') + '">' +
+        '<input type="hidden" name="mes" value="' + k + '">' +
+        '<input name="total" inputmode="numeric" value="' + Math.round(caja.meses[k]).toLocaleString('es-AR') + '">' +
+        '<button type="submit">ok</button></form></div>' +
+        '<form class="mini" style="justify-content:flex-end;margin:-4px 0 6px" method="post" action="' + accion('/ingresos/mes/borrar') + '" ' +
+        'onsubmit="return confirm(\'¿Borrar el total cargado de ' + nombreMes(k) + '?\')">' +
+        '<input type="hidden" name="mes" value="' + k + '">' +
+        '<button class="borrar" type="submit">usar el del sistema</button></form>';
+    });
+    h += '<form class="form" method="post" action="' + accion('/ingresos/mes') + '">' +
+      '<label>Mes<input type="month" name="mes" required></label>' +
+      '<label>Total del mes<input name="total" inputmode="numeric" placeholder="$ 0" required></label>' +
+      '<button class="ancho" type="submit">Cargar mes</button></form></div>';
+
+    h += '<div class="seccion"><div class="botones"><a class="b" href="/metricas' + c + '">Métricas</a>' +
+      '<a class="b" href="/admin' + c + '">Panel</a></div></div>' +
+      '<div class="pie">' + (persistenciaOk ? 'guardado en el volumen' : 'SIN GUARDAR EN DISCO') + '</div></body></html>';
+    res.type('text/html').send(h);
+  });
+
+  function volverAIngresos(res, msg) {
+    res.redirect('/ingresos' + (c ? c + '&' : '?') + 'ok=' + encodeURIComponent(msg));
+  }
+
+  app.post('/ingresos/efectivo', function (req, res) {
+    if (!claveOk(req)) return res.status(403).send('clave invalida');
+    const b = req.body || {};
+    const monto = leerPesos(b.monto);
+    const desde = String(b.desde || ''), hasta = String(b.hasta || '');
+    if (!monto) return volverAIngresos(res, 'No se guardó: falta el monto.');
+    if (!esNoche(desde) || !esNoche(hasta) || desde > hasta) return volverAIngresos(res, 'No se guardó: revisá las fechas.');
+    if (nochesEntre(desde, hasta).length > 120) return volverAIngresos(res, 'No se guardó: son más de 120 noches.');
+    const pisa = caja.efectivo.filter(function (e) { return !(hasta < e.desde || desde > e.hasta); });
+    if (pisa.length) return volverAIngresos(res, 'No se guardó: esas noches ya están en otra recaudación (' +
+      fechaCorta(pisa[0].desde) + ' al ' + fechaCorta(pisa[0].hasta) + ').');
+    const e = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), monto: monto, desde: desde, hasta: hasta,
+                nota: String(b.nota || '').slice(0, 80), ts: Date.now() };
+    caja.efectivo.push(e);
+    guardar(F_CAJA, caja);
+    log('CAJA', 'efectivo del billetero: ' + pesos(monto) + ' (noches ' + desde + ' a ' + hasta + ')');
+    volverAIngresos(res, 'Guardado: ' + pesos(monto) + ' del ' + fechaCorta(desde) + ' al ' + fechaCorta(hasta) + '.');
+  });
+
+  app.post('/ingresos/efectivo/borrar', function (req, res) {
+    if (!claveOk(req)) return res.status(403).send('clave invalida');
+    const id = String((req.body || {}).id || '');
+    const e = caja.efectivo.filter(function (x) { return x.id === id; })[0];
+    if (!e) return volverAIngresos(res, 'No estaba esa recaudación.');
+    caja.efectivo = caja.efectivo.filter(function (x) { return x.id !== id; });
+    guardar(F_CAJA, caja);
+    log('CAJA', 'recaudacion borrada: ' + pesos(e.monto) + ' (' + e.desde + ' a ' + e.hasta + ')');
+    volverAIngresos(res, 'Borrada la recaudación de ' + pesos(e.monto) + '.');
+  });
+
+  app.post('/ingresos/mes', function (req, res) {
+    if (!claveOk(req)) return res.status(403).send('clave invalida');
+    const b = req.body || {};
+    const mes = String(b.mes || ''), total = leerPesos(b.total);
+    if (!esMes(mes) || !total) return volverAIngresos(res, 'No se guardó: revisá el mes y el total.');
+    caja.meses[mes] = total;
+    guardar(F_CAJA, caja);
+    log('CAJA', 'total de ' + mes + ' cargado a mano: ' + pesos(total));
+    volverAIngresos(res, nombreMes(mes) + ': ' + pesos(total) + '.');
+  });
+
+  app.post('/ingresos/mes/borrar', function (req, res) {
+    if (!claveOk(req)) return res.status(403).send('clave invalida');
+    const mes = String((req.body || {}).mes || '');
+    if (!esMes(mes) || caja.meses[mes] === undefined) return volverAIngresos(res, 'Ese mes no estaba cargado.');
+    delete caja.meses[mes];
+    guardar(F_CAJA, caja);
+    log('CAJA', 'total de ' + mes + ' borrado: vuelve a usar el del sistema');
+    volverAIngresos(res, nombreMes(mes) + ': ahora usa el número del sistema.');
+  });
+
+  /* EXPORTAR: todo lo que hace falta para armar el tablero de inversores,
+     en un solo archivo JSON. Sin nombres ni Instagram de la gente: solo
+     plata, horarios, caidas y puntajes. */
+  app.get('/exportar', function (req, res) {
+    if (!claveOk(req)) return res.status(403).send('clave invalida');
+    cerrarJornadasPendientes();
+    const datos = {
+      generado: Date.now(),
+      zona: TZ,
+      porcentajeBar: PORCENTAJE_BAR,
+      horaAbre: HORA_ABRE,
+      totemDesde: TOTEM_DESDE,
+      jornadas: historico(),
+      ventas: dVentas().map(function (v) {
+        return { ts: v.ts, monto: v.monto, fichas: v.fichas, tipo: v.tipo };
+      }),
+      caidas: dCaidas().map(function (x) {
+        return { inicio: x.inicio, fin: x.fin, motivo: x.motivo || null, enHorario: !!x.enHorario,
+                 apagada: x.apagada || null, prendida: x.prendida || null, incompleta: !!x.incompleta,
+                 cierre: esCierreDeNoche(x) };
+      }),
+      redes: redes.map(function (r) { return { desde: r.desde, hasta: r.hasta, ssid: r.ssid, rssi: r.rssi }; }),
+      cupones: resumenCupones(),
+      canjes: dCanjes().map(function (x) { return { ts: x.ts, conv15: !!x.conv15, montoConv: x.montoConv || 0 }; }),
+      pinas: pinas().filter(pinaVisible).map(function (p) {
+        return { ts: p.ts, noche: p.noche, score: p.score, sexo: p.sexo || null };
+      }),
+      meses: ingresosPorMes(),
+      caja: caja
+    };
+    res.setHeader('Content-Disposition', 'attachment; filename="beerpunch-datos-' + nocheHoy() + '.json"');
+    res.json(datos);
+  });
+
   // ---------- datos crudos, por si hacen falta ----------
   app.get('/api/metricas', function (req, res) {
     if (!claveOk(req)) return res.status(403).json({ error: 'clave invalida' });
@@ -1596,7 +2055,8 @@ module.exports = function montarMetricas(app, ctx) {
       adopcion30: adopcion(30),
       recurrencia30: recurrencia(30),
       pisoYTecho30: pisoYTecho(30),
-      alertas: alertas()
+      alertas: alertas(),
+      meses: ingresosPorMes()
     });
   });
 
@@ -1616,6 +2076,9 @@ module.exports = function montarMetricas(app, ctx) {
     escribirAtomico: escribirAtomico,
     abiertoEn: abiertoEn,
     minutosAbiertosDe: minutosAbiertosDe,
+    esCierreDeNoche: esCierreDeNoche,
+    finDelCierre: finDelCierre,
+    ingresosPorMes: ingresosPorMes,
     resumenSemanalLargo: function () {
       const sem  = ingresosEntre(claveHaceDias(6), nocheHoy());
       const sem2 = ingresosEntre(claveHaceDias(13), claveHaceDias(7));
